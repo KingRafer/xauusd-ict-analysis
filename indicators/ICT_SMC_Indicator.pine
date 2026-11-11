@@ -1,31 +1,29 @@
-// © KingRafer — ICT / Smart Money Concepts (Stable)
+// © KingRafer — ICT SMC + Entry / SL / TP Signals
 //@version=5
-indicator("ICT Full SMC", shorttitle="ICT SMC", overlay=true, max_boxes_count=80, max_lines_count=60, max_labels_count=40)
+indicator("ICT SMC + Signals", shorttitle="ICT Signals", overlay=true, max_boxes_count=60, max_lines_count=50, max_labels_count=50)
 
 // ══════════════════════════════════════
 // INPUTS
 // ══════════════════════════════════════
-showFVG     = input.bool(true,  "Show FVG")
-showIFVG    = input.bool(true,  "Show Inversion FVG")
-showMS      = input.bool(true,  "Show BOS / CHoCH")
-showOTE     = input.bool(true,  "Show OTE Zone")
-showOB      = input.bool(true,  "Show Order Blocks")
-showLiq     = input.bool(true,  "Show Liquidity")
-showTurtle  = input.bool(true,  "Show Turtle Soup")
-showSB      = input.bool(true,  "Show Silver Bullet Window")
-showCISD    = input.bool(true,  "Show CISD")
-showCRT     = input.bool(true,  "Show CRT (Prev Candle)")
-showPO3     = input.bool(true,  "Show Session Background")
+showFVG      = input.bool(true,  "Show FVG")
+showMS       = input.bool(true,  "Show BOS / CHoCH")
+showOTE      = input.bool(true,  "Show OTE Zone")
+showSignals  = input.bool(true,  "Show Entry / SL / TP")
+showSB       = input.bool(true,  "Show Silver Bullet Window")
+showTurtle   = input.bool(true,  "Use Turtle Soup Signals")
+showCISD     = input.bool(true,  "Use CISD Confirmation")
 
-swingLen    = input.int(5,  "Swing Length", minval=2, maxval=15)
-extendFVG   = input.int(20, "FVG Extend Bars", minval=5)
-oteLen      = input.int(30, "OTE Lookback", minval=10)
-sbStart     = input.int(10, "Silver Bullet Start (NY hour)", minval=0, maxval=23)
-sbEnd       = input.int(11, "Silver Bullet End (NY hour)", minval=0, maxval=23)
-cisdMult    = input.float(1.4, "CISD ATR Mult", minval=1.0, step=0.1)
+swingLen     = input.int(5,   "Swing Length", minval=2, maxval=15)
+extendFVG    = input.int(15,  "FVG Extend", minval=5)
+oteLen       = input.int(30,  "OTE Lookback", minval=10)
+sbStart      = input.int(10,  "SB Start Hour NY", minval=0, maxval=23)
+sbEnd        = input.int(11,  "SB End Hour NY", minval=0, maxval=23)
+rrTP1        = input.float(1.5, "TP1 Risk:Reward", minval=1.0, step=0.1)
+rrTP2        = input.float(2.5, "TP2 Risk:Reward", minval=1.5, step=0.1)
+slBuffer     = input.float(0.3, "SL Buffer (ATR mult)", minval=0.1, step=0.1)
 
-bullCol = color.new(#22c55e, 80)
-bearCol = color.new(#ef4444, 80)
+bullCol = color.new(#22c55e, 82)
+bearCol = color.new(#ef4444, 82)
 oteCol  = color.new(#3b82f6, 88)
 sbCol   = color.new(#a855f7, 92)
 
@@ -50,59 +48,53 @@ if not na(pl)
     lastSL := pl
     slBar  := bar_index - swingLen
 
+nyHour = hour(time, "America/New_York")
+inSB   = nyHour >= sbStart and nyHour < sbEnd
+
 // ══════════════════════════════════════
-// 1. FAIR VALUE GAP
+// FVG (simple)
 // ══════════════════════════════════════
 var box[] bFVG = array.new_box()
 var box[] sFVG = array.new_box()
-var box[] iFVG = array.new_box()
+
+bullFVGNow = low > high[2]
+bearFVGNow = high < low[2]
 
 if showFVG and barstate.isconfirmed
-    // Bullish FVG
-    if low > high[2]
-        bx = box.new(bar_index - 2, low, bar_index + extendFVG, high[2], border_color=#22c55e, bgcolor=bullCol, text="FVG", text_size=size.tiny, text_color=#22c55e)
+    if bullFVGNow
+        bx = box.new(bar_index-2, low, bar_index+extendFVG, high[2], border_color=#22c55e, bgcolor=bullCol, text="FVG", text_size=size.tiny, text_color=#22c55e)
         array.push(bFVG, bx)
-        if array.size(bFVG) > 10
+        if array.size(bFVG) > 8
             box.delete(array.shift(bFVG))
-
-    // Bearish FVG
-    if high < low[2]
-        bx = box.new(bar_index - 2, low[2], bar_index + extendFVG, high, border_color=#ef4444, bgcolor=bearCol, text="FVG", text_size=size.tiny, text_color=#ef4444)
+    if bearFVGNow
+        bx = box.new(bar_index-2, low[2], bar_index+extendFVG, high, border_color=#ef4444, bgcolor=bearCol, text="FVG", text_size=size.tiny, text_color=#ef4444)
         array.push(sFVG, bx)
-        if array.size(sFVG) > 10
+        if array.size(sFVG) > 8
             box.delete(array.shift(sFVG))
 
-// Mitigate + Inversion
+// Mitigate FVG
 if barstate.isconfirmed
     if array.size(bFVG) > 0
-        for i = array.size(bFVG) - 1 to 0
+        for i = array.size(bFVG)-1 to 0
             bx = array.get(bFVG, i)
             if low <= box.get_bottom(bx)
-                if showIFVG
-                    inv = box.new(box.get_left(bx), box.get_top(bx), bar_index + 8, box.get_bottom(bx), border_color=#eab308, bgcolor=color.new(#eab308, 90), text="iFVG", text_size=size.tiny, text_color=#eab308)
-                    array.push(iFVG, inv)
-                    if array.size(iFVG) > 6
-                        box.delete(array.shift(iFVG))
                 box.delete(bx)
                 array.remove(bFVG, i)
-
     if array.size(sFVG) > 0
-        for i = array.size(sFVG) - 1 to 0
+        for i = array.size(sFVG)-1 to 0
             bx = array.get(sFVG, i)
             if high >= box.get_top(bx)
-                if showIFVG
-                    inv = box.new(box.get_left(bx), box.get_top(bx), bar_index + 8, box.get_bottom(bx), border_color=#eab308, bgcolor=color.new(#eab308, 90), text="iFVG", text_size=size.tiny, text_color=#eab308)
-                    array.push(iFVG, inv)
-                    if array.size(iFVG) > 6
-                        box.delete(array.shift(iFVG))
                 box.delete(bx)
                 array.remove(sFVG, i)
 
 // ══════════════════════════════════════
-// 2. MARKET STRUCTURE BOS / CHoCH
+// MARKET STRUCTURE
 // ══════════════════════════════════════
 var line  msLine = na
 var label msLab  = na
+
+bosBull = false
+bosBear = false
 
 if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
     if close > lastSH and bias != "bull"
@@ -114,6 +106,7 @@ if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
         msLine := line.new(shBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed)
         msLab  := label.new(bar_index, lastSH, txt, style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.small)
         bias   := "bull"
+        bosBull := true
 
     if close < lastSL and bias != "bear"
         txt = bias == "bull" ? "CHoCH ▼" : "BOS ▼"
@@ -124,127 +117,154 @@ if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
         msLine := line.new(slBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed)
         msLab  := label.new(bar_index, lastSL, txt, style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.small)
         bias   := "bear"
+        bosBear := true
 
 // ══════════════════════════════════════
-// 3. OTE ZONE (0.618 - 0.786)
+// OTE ZONE
 // ══════════════════════════════════════
-var box  oteB = na
-var line ote1 = na
-var line ote2 = na
+var box oteB = na
 
 if showOTE and barstate.islast
     hi = ta.highest(high, oteLen)
     lo = ta.lowest(low, oteLen)
-    rng = hi - lo
-    top = lo + rng * 0.786
-    bot = lo + rng * 0.618
-
+    top = lo + (hi - lo) * 0.786
+    bot = lo + (hi - lo) * 0.618
     if not na(oteB)
         box.delete(oteB)
-    if not na(ote1)
-        line.delete(ote1)
-    if not na(ote2)
-        line.delete(ote2)
-
-    oteB := box.new(bar_index - oteLen, top, bar_index + 3, bot, border_color=#3b82f6, bgcolor=oteCol, text="OTE", text_size=size.tiny, text_color=#3b82f6)
-    ote1 := line.new(bar_index - oteLen, bot, bar_index + 3, bot, color=#3b82f6, style=line.style_dotted)
-    ote2 := line.new(bar_index - oteLen, top, bar_index + 3, top, color=#3b82f6, style=line.style_dotted)
+    oteB := box.new(bar_index - oteLen, top, bar_index + 2, bot, border_color=#3b82f6, bgcolor=oteCol, text="OTE", text_size=size.tiny, text_color=#3b82f6)
 
 // ══════════════════════════════════════
-// 4. ORDER BLOCK
+// SIGNAL CONDITIONS
 // ══════════════════════════════════════
-var box[] bOB = array.new_box()
-var box[] sOB = array.new_box()
-
-if showOB and barstate.isconfirmed
-    if close[1] < open[1] and close > high[1] and (close - open) > atrVal * 0.5
-        bx = box.new(bar_index - 1, high[1], bar_index + 12, low[1], border_color=#22c55e, bgcolor=color.new(#22c55e, 90), text="OB", text_size=size.tiny, text_color=#22c55e)
-        array.push(bOB, bx)
-        if array.size(bOB) > 6
-            box.delete(array.shift(bOB))
-
-    if close[1] > open[1] and close < low[1] and (open - close) > atrVal * 0.5
-        bx = box.new(bar_index - 1, high[1], bar_index + 12, low[1], border_color=#ef4444, bgcolor=color.new(#ef4444, 90), text="OB", text_size=size.tiny, text_color=#ef4444)
-        array.push(sOB, bx)
-        if array.size(sOB) > 6
-            box.delete(array.shift(sOB))
-
-// ══════════════════════════════════════
-// 5. LIQUIDITY + TURTLE SOUP
-// ══════════════════════════════════════
-var line liqH = na
-var line liqL = na
-
-if showLiq and barstate.islast and not na(lastSH)
-    if not na(liqH)
-        line.delete(liqH)
-    liqH := line.new(shBar, lastSH, bar_index + 10, lastSH, color=color.new(#f59e0b, 40), style=line.style_dotted)
-
-if showLiq and barstate.islast and not na(lastSL)
-    if not na(liqL)
-        line.delete(liqL)
-    liqL := line.new(slBar, lastSL, bar_index + 10, lastSL, color=color.new(#f59e0b, 40), style=line.style_dotted)
-
+// Turtle Soup
 turtleLong  = showTurtle and not na(lastSL) and low < lastSL and close > lastSL
 turtleShort = showTurtle and not na(lastSH) and high > lastSH and close < lastSH
 
-plotshape(turtleLong,  title="TS Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, text="TS")
-plotshape(turtleShort, title="TS Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, text="TS")
+// CISD
+cisdUp   = showCISD and close > open and (close - open) > atrVal * 1.3 and close > high[1]
+cisdDown = showCISD and close < open and (open - close) > atrVal * 1.3 and close < low[1]
+
+// Combined long/short setup
+longSetup  = (turtleLong or (bosBull and bullFVGNow) or (cisdUp and bias == "bull")) and barstate.isconfirmed
+shortSetup = (turtleShort or (bosBear and bearFVGNow) or (cisdDown and bias == "bear")) and barstate.isconfirmed
+
+// Prefer signals inside Silver Bullet window (optional boost)
+longSetup  := longSetup
+shortSetup := shortSetup
 
 // ══════════════════════════════════════
-// 6. SILVER BULLET (NY time)
+// ENTRY / SL / TP CALCULATION & DRAW
 // ══════════════════════════════════════
-nyHour = hour(time, "America/New_York")
-inSB   = nyHour >= sbStart and nyHour < sbEnd
+var line  entryLine = na
+var line  slLine    = na
+var line  tp1Line   = na
+var line  tp2Line   = na
+var label entryLab  = na
+var label slLab     = na
+var label tp1Lab    = na
+var label tp2Lab    = na
+var label sigLab    = na
 
+if showSignals and barstate.isconfirmed
+    if longSetup and not na(lastSL)
+        entryPrice = close
+        slPrice    = lastSL - atrVal * slBuffer
+        risk       = entryPrice - slPrice
+        tp1Price   = entryPrice + risk * rrTP1
+        tp2Price   = entryPrice + risk * rrTP2
+
+        // clear old
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tp1Line)
+            line.delete(tp1Line)
+        if not na(tp2Line)
+            line.delete(tp2Line)
+        if not na(entryLab)
+            label.delete(entryLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tp1Lab)
+            label.delete(tp1Lab)
+        if not na(tp2Lab)
+            label.delete(tp2Lab)
+        if not na(sigLab)
+            label.delete(sigLab)
+
+        entryLine := line.new(bar_index, entryPrice, bar_index + 15, entryPrice, color=#22c55e, width=2)
+        slLine    := line.new(bar_index, slPrice,    bar_index + 15, slPrice,    color=#ef4444, width=2)
+        tp1Line   := line.new(bar_index, tp1Price,   bar_index + 15, tp1Price,   color=#3b82f6, width=1, style=line.style_dashed)
+        tp2Line   := line.new(bar_index, tp2Price,   bar_index + 15, tp2Price,   color=#8b5cf6, width=1, style=line.style_dashed)
+
+        entryLab := label.new(bar_index + 15, entryPrice, "ENTRY " + str.tostring(entryPrice, "#.##"), style=label.style_label_left, color=#22c55e, textcolor=color.white, size=size.small)
+        slLab    := label.new(bar_index + 15, slPrice,    "SL " + str.tostring(slPrice, "#.##"), style=label.style_label_left, color=#ef4444, textcolor=color.white, size=size.small)
+        tp1Lab   := label.new(bar_index + 15, tp1Price,   "TP1 " + str.tostring(tp1Price, "#.##"), style=label.style_label_left, color=#3b82f6, textcolor=color.white, size=size.small)
+        tp2Lab   := label.new(bar_index + 15, tp2Price,   "TP2 " + str.tostring(tp2Price, "#.##"), style=label.style_label_left, color=#8b5cf6, textcolor=color.white, size=size.small)
+
+        reason = turtleLong ? "Turtle Soup" : bosBull ? "BOS + FVG" : "CISD"
+        sigLab := label.new(bar_index, low, "LONG\n" + reason, style=label.style_label_up, color=#22c55e, textcolor=color.white, size=size.normal)
+
+    if shortSetup and not na(lastSH)
+        entryPrice = close
+        slPrice    = lastSH + atrVal * slBuffer
+        risk       = slPrice - entryPrice
+        tp1Price   = entryPrice - risk * rrTP1
+        tp2Price   = entryPrice - risk * rrTP2
+
+        if not na(entryLine)
+            line.delete(entryLine)
+        if not na(slLine)
+            line.delete(slLine)
+        if not na(tp1Line)
+            line.delete(tp1Line)
+        if not na(tp2Line)
+            line.delete(tp2Line)
+        if not na(entryLab)
+            label.delete(entryLab)
+        if not na(slLab)
+            label.delete(slLab)
+        if not na(tp1Lab)
+            label.delete(tp1Lab)
+        if not na(tp2Lab)
+            label.delete(tp2Lab)
+        if not na(sigLab)
+            label.delete(sigLab)
+
+        entryLine := line.new(bar_index, entryPrice, bar_index + 15, entryPrice, color=#ef4444, width=2)
+        slLine    := line.new(bar_index, slPrice,    bar_index + 15, slPrice,    color=#22c55e, width=2)
+        tp1Line   := line.new(bar_index, tp1Price,   bar_index + 15, tp1Price,   color=#3b82f6, width=1, style=line.style_dashed)
+        tp2Line   := line.new(bar_index, tp2Price,   bar_index + 15, tp2Price,   color=#8b5cf6, width=1, style=line.style_dashed)
+
+        entryLab := label.new(bar_index + 15, entryPrice, "ENTRY " + str.tostring(entryPrice, "#.##"), style=label.style_label_left, color=#ef4444, textcolor=color.white, size=size.small)
+        slLab    := label.new(bar_index + 15, slPrice,    "SL " + str.tostring(slPrice, "#.##"), style=label.style_label_left, color=#22c55e, textcolor=color.white, size=size.small)
+        tp1Lab   := label.new(bar_index + 15, tp1Price,   "TP1 " + str.tostring(tp1Price, "#.##"), style=label.style_label_left, color=#3b82f6, textcolor=color.white, size=size.small)
+        tp2Lab   := label.new(bar_index + 15, tp2Price,   "TP2 " + str.tostring(tp2Price, "#.##"), style=label.style_label_left, color=#8b5cf6, textcolor=color.white, size=size.small)
+
+        reason = turtleShort ? "Turtle Soup" : bosBear ? "BOS + FVG" : "CISD"
+        sigLab := label.new(bar_index, high, "SHORT\n" + reason, style=label.style_label_down, color=#ef4444, textcolor=color.white, size=size.normal)
+
+// Shapes for quick view
+plotshape(showSignals and longSetup,  title="Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.normal)
+plotshape(showSignals and shortSetup, title="Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.normal)
+
+// ══════════════════════════════════════
+// SILVER BULLET BG
+// ══════════════════════════════════════
 bgcolor(showSB and inSB ? sbCol : na, title="Silver Bullet")
-
-// ══════════════════════════════════════
-// 7. CISD
-// ══════════════════════════════════════
-cisdUp   = showCISD and close > open and (close - open) > atrVal * cisdMult and close > high[1]
-cisdDown = showCISD and close < open and (open - close) > atrVal * cisdMult and close < low[1]
-
-plotshape(cisdUp,   title="CISD Up",   style=shape.diamond, location=location.belowbar, color=#22c55e, size=size.tiny, text="CISD")
-plotshape(cisdDown, title="CISD Down", style=shape.diamond, location=location.abovebar, color=#ef4444, size=size.tiny, text="CISD")
-
-// ══════════════════════════════════════
-// 8. CRT - Previous Candle Range
-// ══════════════════════════════════════
-var line crtH = na
-var line crtL = na
-
-if showCRT and barstate.islast
-    if not na(crtH)
-        line.delete(crtH)
-    if not na(crtL)
-        line.delete(crtL)
-    crtH := line.new(bar_index - 1, high[1], bar_index + 6, high[1], color=color.new(#94a3b8, 50), style=line.style_dotted)
-    crtL := line.new(bar_index - 1, low[1],  bar_index + 6, low[1],  color=color.new(#94a3b8, 50), style=line.style_dotted)
-
-// ══════════════════════════════════════
-// 9. POWER OF THREE - Session BG
-// ══════════════════════════════════════
-isAsia   = showPO3 and (nyHour >= 19 or nyHour < 3)
-isLondon = showPO3 and nyHour >= 3 and nyHour < 8
-isNY     = showPO3 and nyHour >= 8 and nyHour < 17
-
-bgcolor(isAsia ? color.new(#64748b, 95) : na, title="Asia")
-bgcolor(isLondon ? color.new(#f59e0b, 95) : na, title="London")
-bgcolor(isNY and not inSB ? color.new(#3b82f6, 96) : na, title="New York")
 
 // ══════════════════════════════════════
 // INFO TABLE
 // ══════════════════════════════════════
-var table tb = table.new(position.top_right, 2, 4, bgcolor=color.new(#0b0f14, 20), border_width=1)
+var table tb = table.new(position.top_right, 2, 5, bgcolor=color.new(#0b0f14, 15), border_width=1)
 
 if barstate.islast
     table.cell(tb, 0, 0, "Bias", text_color=#8b9cb3, text_size=size.small)
     table.cell(tb, 1, 0, bias == "bull" ? "BULLISH" : bias == "bear" ? "BEARISH" : "NEUTRAL", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #8b9cb3, text_size=size.small)
 
     table.cell(tb, 0, 1, "Session", text_color=#8b9cb3, text_size=size.small)
-    sessName = inSB ? "SILVER BULLET" : isLondon ? "London" : isNY ? "New York" : isAsia ? "Asia" : "—"
-    table.cell(tb, 1, 1, sessName, text_color=#a855f7, text_size=size.small)
+    table.cell(tb, 1, 1, inSB ? "SILVER BULLET" : "—", text_color=#a855f7, text_size=size.small)
 
     table.cell(tb, 0, 2, "Swing H", text_color=#8b9cb3, text_size=size.tiny)
     table.cell(tb, 1, 2, na(lastSH) ? "—" : str.tostring(lastSH, "#.##"), text_color=color.white, text_size=size.tiny)
@@ -252,6 +272,5 @@ if barstate.islast
     table.cell(tb, 0, 3, "Swing L", text_color=#8b9cb3, text_size=size.tiny)
     table.cell(tb, 1, 3, na(lastSL) ? "—" : str.tostring(lastSL, "#.##"), text_color=color.white, text_size=size.tiny)
 
-// Swing markers
-plotshape(showMS and not na(ph), style=shape.triangledown, location=location.abovebar, color=color.new(#ef4444, 70), size=size.tiny)
-plotshape(showMS and not na(pl), style=shape.triangleup,   location=location.belowbar, color=color.new(#22c55e, 70), size=size.tiny)
+    table.cell(tb, 0, 4, "RR", text_color=#8b9cb3, text_size=size.tiny)
+    table.cell(tb, 1, 4, str.tostring(rrTP1) + " / " + str.tostring(rrTP2), text_color=#3b82f6, text_size=size.tiny)
