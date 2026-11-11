@@ -1,15 +1,19 @@
-// © KingRafer — ICT Simple & Accurate
-// FVG + BOS/CHoCH + Turtle Soup + Silver Bullet
+// © KingRafer — ICT Simple + Entry/SL/TP (High Accuracy)
 //@version=5
-indicator("ICT Simple", shorttitle="ICT", overlay=true, max_boxes_count=20, max_lines_count=10, max_labels_count=15)
+indicator("ICT Simple + Signals", shorttitle="ICT Sig", overlay=true, max_boxes_count=20, max_lines_count=20, max_labels_count=25)
 
 // ─── Inputs ───
-showFVG    = input.bool(true, "Fair Value Gap")
-showMS     = input.bool(true, "BOS / CHoCH")
-showTurtle = input.bool(true, "Turtle Soup")
-showSB     = input.bool(true, "Silver Bullet (10-11 NY)")
-swingLen   = input.int(5, "Swing Length", minval=3, maxval=10)
-fvgBars    = input.int(15, "FVG Max Bars", minval=5, maxval=30)
+showFVG     = input.bool(true,  "Show FVG")
+showMS      = input.bool(true,  "Show BOS / CHoCH")
+showTurtle  = input.bool(true,  "Show Turtle Soup")
+showSB      = input.bool(true,  "Silver Bullet Window")
+showSignals = input.bool(true,  "Show Entry / SL / TP")
+onlySB      = input.bool(false, "Signals only in Silver Bullet")
+swingLen    = input.int(5, "Swing Length", minval=3, maxval=10)
+fvgBars     = input.int(15, "FVG Extend", minval=5)
+rrTP1       = input.float(2.0, "TP1 Risk:Reward", minval=1.5, step=0.1)
+rrTP2       = input.float(3.0, "TP2 Risk:Reward", minval=2.0, step=0.1)
+slBuf       = input.float(0.2, "SL Buffer (ATR)", minval=0.05, step=0.05)
 
 // ─── Swings ───
 ph = ta.pivothigh(high, swingLen, swingLen)
@@ -28,28 +32,30 @@ if not na(pl)
     lastSL := pl
     slBar  := bar_index - swingLen
 
+atrVal = ta.atr(14)
 nyHour = hour(time, "America/New_York")
 inSB   = nyHour >= 10 and nyHour < 11
 
-// ─── 1. FVG (max 4 each side, auto remove when filled) ───
+// ─── FVG ───
 var box[] bFVG = array.new_box()
 var box[] sFVG = array.new_box()
+bullFVG = false
+bearFVG = false
 
 if showFVG and barstate.isconfirmed
-    // Bullish FVG
     if low > high[2]
+        bullFVG := true
         bx = box.new(bar_index-2, low, bar_index+fvgBars, high[2], border_color=#22c55e, bgcolor=color.new(#22c55e, 85), text="FVG", text_size=size.tiny, text_color=#22c55e)
         array.push(bFVG, bx)
         if array.size(bFVG) > 4
             box.delete(array.shift(bFVG))
-    // Bearish FVG
     if high < low[2]
+        bearFVG := true
         bx = box.new(bar_index-2, low[2], bar_index+fvgBars, high, border_color=#ef4444, bgcolor=color.new(#ef4444, 85), text="FVG", text_size=size.tiny, text_color=#ef4444)
         array.push(sFVG, bx)
         if array.size(sFVG) > 4
             box.delete(array.shift(sFVG))
 
-// Remove filled FVG
 if barstate.isconfirmed
     if array.size(bFVG) > 0
         for i = array.size(bFVG)-1 to 0
@@ -64,9 +70,11 @@ if barstate.isconfirmed
                 box.delete(bx)
                 array.remove(sFVG, i)
 
-// ─── 2. BOS / CHoCH (one line only) ───
+// ─── BOS / CHoCH ───
 var line  msLine = na
 var label msLab  = na
+bosBull = false
+bosBear = false
 
 if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
     if close > lastSH and bias != "bull"
@@ -78,6 +86,7 @@ if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
         msLine := line.new(shBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed)
         msLab  := label.new(bar_index, lastSH, txt + " ▲", style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.small)
         bias   := "bull"
+        bosBull := true
 
     if close < lastSL and bias != "bear"
         txt = bias == "bull" ? "CHoCH" : "BOS"
@@ -88,28 +97,127 @@ if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
         msLine := line.new(slBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed)
         msLab  := label.new(bar_index, lastSL, txt + " ▼", style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.small)
         bias   := "bear"
+        bosBear := true
 
-// ─── 3. Turtle Soup ───
+// ─── Turtle Soup ───
 tsLong  = showTurtle and not na(lastSL) and low < lastSL and close > lastSL and barstate.isconfirmed
 tsShort = showTurtle and not na(lastSH) and high > lastSH and close < lastSH and barstate.isconfirmed
 
-plotshape(tsLong,  title="TS Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, text="TS")
-plotshape(tsShort, title="TS Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, text="TS")
+plotshape(tsLong,  title="TS Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.tiny, text="TS")
+plotshape(tsShort, title="TS Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.tiny, text="TS")
 
-// ─── 4. Silver Bullet window ───
-bgcolor(showSB and inSB ? color.new(#a855f7, 92) : na, title="Silver Bullet")
+// ─── Silver Bullet BG ───
+bgcolor(showSB and inSB ? color.new(#a855f7, 92) : na, title="SB")
 
-// SB + structure/turtle confluence label
-if showSB and inSB and barstate.isconfirmed
-    if tsLong or (close > lastSH and bias == "bull")
-        label.new(bar_index, low, "SB", style=label.style_label_up, color=#a855f7, textcolor=color.white, size=size.tiny)
-    if tsShort or (close < lastSL and bias == "bear")
-        label.new(bar_index, high, "SB", style=label.style_label_down, color=#a855f7, textcolor=color.white, size=size.tiny)
+// ─── HIGH ACCURACY SIGNAL FILTER ───
+// Long: Turtle Soup in bullish bias OR BOS bull + recent bull FVG
+// Prefer Silver Bullet window if onlySB = true
+longRaw  = (tsLong and (bias == "bull" or bias == "neutral")) or (bosBull and bullFVG)
+shortRaw = (tsShort and (bias == "bear" or bias == "neutral")) or (bosBear and bearFVG)
 
-// ─── Simple table ───
-var table tb = table.new(position.top_right, 2, 2, bgcolor=color.new(#0b0f14, 20), border_width=1)
+longSetup  = showSignals and longRaw and barstate.isconfirmed and (not onlySB or inSB)
+shortSetup = showSignals and shortRaw and barstate.isconfirmed and (not onlySB or inSB)
+
+// ─── Entry / SL / TP (one set at a time) ───
+var line  eL = na
+var line  sL = na
+var line  t1 = na
+var line  t2 = na
+var label eLab = na
+var label sLab = na
+var label t1Lab = na
+var label t2Lab = na
+var label sigLab = na
+
+if longSetup and not na(lastSL)
+    entry = close
+    sl    = math.min(lastSL, low) - atrVal * slBuf
+    risk  = entry - sl
+    if risk > 0
+        tp1 = entry + risk * rrTP1
+        tp2 = entry + risk * rrTP2
+
+        if not na(eL)
+            line.delete(eL)
+        if not na(sL)
+            line.delete(sL)
+        if not na(t1)
+            line.delete(t1)
+        if not na(t2)
+            line.delete(t2)
+        if not na(eLab)
+            label.delete(eLab)
+        if not na(sLab)
+            label.delete(sLab)
+        if not na(t1Lab)
+            label.delete(t1Lab)
+        if not na(t2Lab)
+            label.delete(t2Lab)
+        if not na(sigLab)
+            label.delete(sigLab)
+
+        eL := line.new(bar_index, entry, bar_index + 12, entry, color=#22c55e, width=2)
+        sL := line.new(bar_index, sl,    bar_index + 12, sl,    color=#ef4444, width=2)
+        t1 := line.new(bar_index, tp1,   bar_index + 12, tp1,   color=#3b82f6, width=1, style=line.style_dashed)
+        t2 := line.new(bar_index, tp2,   bar_index + 12, tp2,   color=#8b5cf6, width=1, style=line.style_dashed)
+
+        eLab  := label.new(bar_index + 12, entry, "ENTRY " + str.tostring(entry, "#.##"), style=label.style_label_left, color=#22c55e, textcolor=color.white, size=size.small)
+        sLab  := label.new(bar_index + 12, sl,    "SL " + str.tostring(sl, "#.##"), style=label.style_label_left, color=#ef4444, textcolor=color.white, size=size.small)
+        t1Lab := label.new(bar_index + 12, tp1,   "TP1 " + str.tostring(tp1, "#.##") + " (" + str.tostring(rrTP1) + "R)", style=label.style_label_left, color=#3b82f6, textcolor=color.white, size=size.small)
+        t2Lab := label.new(bar_index + 12, tp2,   "TP2 " + str.tostring(tp2, "#.##") + " (" + str.tostring(rrTP2) + "R)", style=label.style_label_left, color=#8b5cf6, textcolor=color.white, size=size.small)
+
+        reason = tsLong ? "Turtle Soup" : "BOS + FVG"
+        sigLab := label.new(bar_index, low, "LONG\n" + reason, style=label.style_label_up, color=#22c55e, textcolor=color.white, size=size.normal)
+
+if shortSetup and not na(lastSH)
+    entry = close
+    sl    = math.max(lastSH, high) + atrVal * slBuf
+    risk  = sl - entry
+    if risk > 0
+        tp1 = entry - risk * rrTP1
+        tp2 = entry - risk * rrTP2
+
+        if not na(eL)
+            line.delete(eL)
+        if not na(sL)
+            line.delete(sL)
+        if not na(t1)
+            line.delete(t1)
+        if not na(t2)
+            line.delete(t2)
+        if not na(eLab)
+            label.delete(eLab)
+        if not na(sLab)
+            label.delete(sLab)
+        if not na(t1Lab)
+            label.delete(t1Lab)
+        if not na(t2Lab)
+            label.delete(t2Lab)
+        if not na(sigLab)
+            label.delete(sigLab)
+
+        eL := line.new(bar_index, entry, bar_index + 12, entry, color=#ef4444, width=2)
+        sL := line.new(bar_index, sl,    bar_index + 12, sl,    color=#22c55e, width=2)
+        t1 := line.new(bar_index, tp1,   bar_index + 12, tp1,   color=#3b82f6, width=1, style=line.style_dashed)
+        t2 := line.new(bar_index, tp2,   bar_index + 12, tp2,   color=#8b5cf6, width=1, style=line.style_dashed)
+
+        eLab  := label.new(bar_index + 12, entry, "ENTRY " + str.tostring(entry, "#.##"), style=label.style_label_left, color=#ef4444, textcolor=color.white, size=size.small)
+        sLab  := label.new(bar_index + 12, sl,    "SL " + str.tostring(sl, "#.##"), style=label.style_label_left, color=#22c55e, textcolor=color.white, size=size.small)
+        t1Lab := label.new(bar_index + 12, tp1,   "TP1 " + str.tostring(tp1, "#.##") + " (" + str.tostring(rrTP1) + "R)", style=label.style_label_left, color=#3b82f6, textcolor=color.white, size=size.small)
+        t2Lab := label.new(bar_index + 12, tp2,   "TP2 " + str.tostring(tp2, "#.##") + " (" + str.tostring(rrTP2) + "R)", style=label.style_label_left, color=#8b5cf6, textcolor=color.white, size=size.small)
+
+        reason = tsShort ? "Turtle Soup" : "BOS + FVG"
+        sigLab := label.new(bar_index, high, "SHORT\n" + reason, style=label.style_label_down, color=#ef4444, textcolor=color.white, size=size.normal)
+
+plotshape(longSetup,  title="Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small)
+plotshape(shortSetup, title="Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small)
+
+// ─── Table ───
+var table tb = table.new(position.top_right, 2, 3, bgcolor=color.new(#0b0f14, 20), border_width=1)
 if barstate.islast
     table.cell(tb, 0, 0, "Bias", text_color=#94a3b8, text_size=size.small)
     table.cell(tb, 1, 0, bias == "bull" ? "BULL" : bias == "bear" ? "BEAR" : "—", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #94a3b8, text_size=size.small)
     table.cell(tb, 0, 1, "Session", text_color=#94a3b8, text_size=size.small)
     table.cell(tb, 1, 1, inSB ? "SILVER BULLET" : "—", text_color=#a855f7, text_size=size.small)
+    table.cell(tb, 0, 2, "RR", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(tb, 1, 2, str.tostring(rrTP1) + "R / " + str.tostring(rrTP2) + "R", text_color=#3b82f6, text_size=size.tiny)
