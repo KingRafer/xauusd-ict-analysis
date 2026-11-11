@@ -1,0 +1,256 @@
+// © KingRafer — ICT Scalping (1m / 5m / 15m)
+//@version=5
+indicator("ICT Scalping", shorttitle="ICT Scalp", overlay=true, max_boxes_count=40, max_lines_count=40, max_labels_count=40)
+
+// ══════════════════════════════════════
+// INPUTS
+// ══════════════════════════════════════
+showFVG      = input.bool(true,  "Show FVG")
+showSignals  = input.bool(true,  "Show Entry / SL / TP")
+showSB       = input.bool(true,  "Highlight Killzones")
+onlyKZ       = input.bool(false, "Signals only in Killzone")
+
+swingLen     = input.int(3,   "Swing Length (scalp)", minval=2, maxval=8)
+extendFVG    = input.int(8,   "FVG Extend Bars", minval=3)
+rrTP1        = input.float(1.0, "TP1 RR", minval=0.8, step=0.1)
+rrTP2        = input.float(1.8, "TP2 RR", minval=1.2, step=0.1)
+slBuffer     = input.float(0.15, "SL Buffer ATR", minval=0.05, step=0.05)
+
+// Killzone hours (New York time)
+londonStart  = input.int(3,  "London Open (NY)", minval=0, maxval=23)
+londonEnd    = input.int(5,  "London End (NY)", minval=0, maxval=23)
+nyStart      = input.int(8,  "NY Open (NY)", minval=0, maxval=23)
+nyEnd        = input.int(11, "NY End / SB (NY)", minval=0, maxval=23)
+
+bullCol = color.new(#22c55e, 78)
+bearCol = color.new(#ef4444, 78)
+kzCol   = color.new(#a855f7, 91)
+
+// ══════════════════════════════════════
+// COMMON
+// ══════════════════════════════════════
+atrVal = ta.atr(10)
+
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var float lastSL = na
+var int   shBar  = na
+var int   slBar  = na
+var string bias  = "neutral"
+
+if not na(ph)
+    lastSH := ph
+    shBar  := bar_index - swingLen
+if not na(pl)
+    lastSL := pl
+    slBar  := bar_index - swingLen
+
+nyHour = hour(time, "America/New_York")
+inLondon = nyHour >= londonStart and nyHour < londonEnd
+inNY     = nyHour >= nyStart and nyHour < nyEnd
+inKZ     = inLondon or inNY
+
+// ══════════════════════════════════════
+// FVG (fast)
+// ══════════════════════════════════════
+var box[] bFVG = array.new_box()
+var box[] sFVG = array.new_box()
+
+bullFVG = low > high[2]
+bearFVG = high < low[2]
+
+if showFVG and barstate.isconfirmed
+    if bullFVG
+        bx = box.new(bar_index-2, low, bar_index+extendFVG, high[2], border_color=#22c55e, bgcolor=bullCol, text="FVG", text_size=size.tiny, text_color=#22c55e)
+        array.push(bFVG, bx)
+        if array.size(bFVG) > 6
+            box.delete(array.shift(bFVG))
+    if bearFVG
+        bx = box.new(bar_index-2, low[2], bar_index+extendFVG, high, border_color=#ef4444, bgcolor=bearCol, text="FVG", text_size=size.tiny, text_color=#ef4444)
+        array.push(sFVG, bx)
+        if array.size(sFVG) > 6
+            box.delete(array.shift(sFVG))
+
+// Mitigate
+if barstate.isconfirmed
+    if array.size(bFVG) > 0
+        for i = array.size(bFVG)-1 to 0
+            bx = array.get(bFVG, i)
+            if low <= box.get_bottom(bx)
+                box.delete(bx)
+                array.remove(bFVG, i)
+    if array.size(sFVG) > 0
+        for i = array.size(sFVG)-1 to 0
+            bx = array.get(sFVG, i)
+            if high >= box.get_top(bx)
+                box.delete(bx)
+                array.remove(sFVG, i)
+
+// ══════════════════════════════════════
+// STRUCTURE (fast)
+// ══════════════════════════════════════
+var line  msLine = na
+var label msLab  = na
+
+bosBull = false
+bosBear = false
+
+if barstate.isconfirmed and not na(lastSH) and not na(lastSL)
+    if close > lastSH and bias != "bull"
+        if not na(msLine)
+            line.delete(msLine)
+        if not na(msLab)
+            label.delete(msLab)
+        msLine := line.new(shBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed, width=1)
+        msLab  := label.new(bar_index, lastSH, bias == "bear" ? "CHoCH" : "BOS", style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.tiny)
+        bias   := "bull"
+        bosBull := true
+
+    if close < lastSL and bias != "bear"
+        if not na(msLine)
+            line.delete(msLine)
+        if not na(msLab)
+            label.delete(msLab)
+        msLine := line.new(slBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed, width=1)
+        msLab  := label.new(bar_index, lastSL, bias == "bull" ? "CHoCH" : "BOS", style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.tiny)
+        bias   := "bear"
+        bosBear := true
+
+// ══════════════════════════════════════
+// SCALP SETUPS
+// ══════════════════════════════════════
+// Turtle Soup (sweep + reclaim)
+turtleLong  = not na(lastSL) and low < lastSL and close > lastSL
+turtleShort = not na(lastSH) and high > lastSH and close < lastSH
+
+// Micro displacement
+microBull = close > open and (close - open) > atrVal * 0.8 and close > high[1]
+microBear = close < open and (open - close) > atrVal * 0.8 and close < low[1]
+
+// Final conditions
+longCond  = (turtleLong or (bosBull and bullFVG) or (microBull and bias == "bull")) and barstate.isconfirmed
+shortCond = (turtleShort or (bosBear and bearFVG) or (microBear and bias == "bear")) and barstate.isconfirmed
+
+// Optional: only signal inside killzone
+longSetup  = onlyKZ ? (longCond and inKZ) : longCond
+shortSetup = onlyKZ ? (shortCond and inKZ) : shortCond
+
+// ══════════════════════════════════════
+// ENTRY / SL / TP
+// ══════════════════════════════════════
+var line  eLine = na
+var line  sLine = na
+var line  t1Line = na
+var line  t2Line = na
+var label eLab = na
+var label sLab = na
+var label t1Lab = na
+var label t2Lab = na
+var label sigLab = na
+
+if showSignals and barstate.isconfirmed
+    if longSetup and not na(lastSL)
+        entry = close
+        sl    = math.min(lastSL, low) - atrVal * slBuffer
+        risk  = entry - sl
+        tp1   = entry + risk * rrTP1
+        tp2   = entry + risk * rrTP2
+
+        if not na(eLine)
+            line.delete(eLine)
+        if not na(sLine)
+            line.delete(sLine)
+        if not na(t1Line)
+            line.delete(t1Line)
+        if not na(t2Line)
+            line.delete(t2Line)
+        if not na(eLab)
+            label.delete(eLab)
+        if not na(sLab)
+            label.delete(sLab)
+        if not na(t1Lab)
+            label.delete(t1Lab)
+        if not na(t2Lab)
+            label.delete(t2Lab)
+        if not na(sigLab)
+            label.delete(sigLab)
+
+        eLine  := line.new(bar_index, entry, bar_index + 12, entry, color=#22c55e, width=2)
+        sLine  := line.new(bar_index, sl,    bar_index + 12, sl,    color=#ef4444, width=2)
+        t1Line := line.new(bar_index, tp1,   bar_index + 12, tp1,   color=#3b82f6, width=1, style=line.style_dashed)
+        t2Line := line.new(bar_index, tp2,   bar_index + 12, tp2,   color=#8b5cf6, width=1, style=line.style_dashed)
+
+        eLab  := label.new(bar_index + 12, entry, "E " + str.tostring(entry, "#.##"), style=label.style_label_left, color=#22c55e, textcolor=color.white, size=size.small)
+        sLab  := label.new(bar_index + 12, sl,    "SL " + str.tostring(sl, "#.##"), style=label.style_label_left, color=#ef4444, textcolor=color.white, size=size.small)
+        t1Lab := label.new(bar_index + 12, tp1,   "TP1 " + str.tostring(tp1, "#.##"), style=label.style_label_left, color=#3b82f6, textcolor=color.white, size=size.small)
+        t2Lab := label.new(bar_index + 12, tp2,   "TP2 " + str.tostring(tp2, "#.##"), style=label.style_label_left, color=#8b5cf6, textcolor=color.white, size=size.small)
+
+        reason = turtleLong ? "TS" : bosBull ? "BOS+FVG" : "DISP"
+        sigLab := label.new(bar_index, low, "LONG " + reason, style=label.style_label_up, color=#22c55e, textcolor=color.white, size=size.small)
+
+    if shortSetup and not na(lastSH)
+        entry = close
+        sl    = math.max(lastSH, high) + atrVal * slBuffer
+        risk  = sl - entry
+        tp1   = entry - risk * rrTP1
+        tp2   = entry - risk * rrTP2
+
+        if not na(eLine)
+            line.delete(eLine)
+        if not na(sLine)
+            line.delete(sLine)
+        if not na(t1Line)
+            line.delete(t1Line)
+        if not na(t2Line)
+            line.delete(t2Line)
+        if not na(eLab)
+            label.delete(eLab)
+        if not na(sLab)
+            label.delete(sLab)
+        if not na(t1Lab)
+            label.delete(t1Lab)
+        if not na(t2Lab)
+            label.delete(t2Lab)
+        if not na(sigLab)
+            label.delete(sigLab)
+
+        eLine  := line.new(bar_index, entry, bar_index + 12, entry, color=#ef4444, width=2)
+        sLine  := line.new(bar_index, sl,    bar_index + 12, sl,    color=#22c55e, width=2)
+        t1Line := line.new(bar_index, tp1,   bar_index + 12, tp1,   color=#3b82f6, width=1, style=line.style_dashed)
+        t2Line := line.new(bar_index, tp2,   bar_index + 12, tp2,   color=#8b5cf6, width=1, style=line.style_dashed)
+
+        eLab  := label.new(bar_index + 12, entry, "E " + str.tostring(entry, "#.##"), style=label.style_label_left, color=#ef4444, textcolor=color.white, size=size.small)
+        sLab  := label.new(bar_index + 12, sl,    "SL " + str.tostring(sl, "#.##"), style=label.style_label_left, color=#22c55e, textcolor=color.white, size=size.small)
+        t1Lab := label.new(bar_index + 12, tp1,   "TP1 " + str.tostring(tp1, "#.##"), style=label.style_label_left, color=#3b82f6, textcolor=color.white, size=size.small)
+        t2Lab := label.new(bar_index + 12, tp2,   "TP2 " + str.tostring(tp2, "#.##"), style=label.style_label_left, color=#8b5cf6, textcolor=color.white, size=size.small)
+
+        reason = turtleShort ? "TS" : bosBear ? "BOS+FVG" : "DISP"
+        sigLab := label.new(bar_index, high, "SHORT " + reason, style=label.style_label_down, color=#ef4444, textcolor=color.white, size=size.small)
+
+plotshape(showSignals and longSetup,  title="L", style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small)
+plotshape(showSignals and shortSetup, title="S", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small)
+
+// ══════════════════════════════════════
+// KILLZONE BACKGROUND
+// ══════════════════════════════════════
+bgcolor(showSB and inKZ ? kzCol : na, title="Killzone")
+
+// ══════════════════════════════════════
+// TABLE
+// ══════════════════════════════════════
+var table tb = table.new(position.top_right, 2, 4, bgcolor=color.new(#0b0f14, 15), border_width=1)
+
+if barstate.islast
+    table.cell(tb, 0, 0, "Bias", text_color=#8b9cb3, text_size=size.small)
+    table.cell(tb, 1, 0, bias == "bull" ? "BULL" : bias == "bear" ? "BEAR" : "—", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #8b9cb3, text_size=size.small)
+
+    table.cell(tb, 0, 1, "KZ", text_color=#8b9cb3, text_size=size.small)
+    table.cell(tb, 1, 1, inLondon ? "LONDON" : inNY ? "NY / SB" : "—", text_color=#a855f7, text_size=size.small)
+
+    table.cell(tb, 0, 2, "RR", text_color=#8b9cb3, text_size=size.tiny)
+    table.cell(tb, 1, 2, str.tostring(rrTP1) + " / " + str.tostring(rrTP2), text_color=#3b82f6, text_size=size.tiny)
+
+    table.cell(tb, 0, 3, "TF", text_color=#8b9cb3, text_size=size.tiny)
+    table.cell(tb, 1, 3, "Scalp 1-15m", text_color=color.white, text_size=size.tiny)
