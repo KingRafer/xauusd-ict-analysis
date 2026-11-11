@@ -1,0 +1,197 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © KingRafer - ICT / Smart Money Concepts Indicator for XAUUSD & other markets
+
+//@version=5
+indicator("ICT SMC Indicator", shorttitle="ICT SMC", overlay=true, max_boxes_count=100, max_lines_count=100, max_labels_count=50)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════
+group_fvg     = "Fair Value Gap (FVG)"
+group_ms      = "Market Structure"
+group_liq     = "Liquidity"
+group_ob      = "Order Block (Simplified)"
+group_style   = "Style"
+
+showFVG       = input.bool(true,  "Show Fair Value Gaps", group=group_fvg)
+fvgLength     = input.int(3, "FVG Lookback (candles)", minval=1, group=group_fvg)
+extendFVG     = input.int(20, "Extend FVG Boxes (bars)", minval=5, group=group_fvg)
+showIFVG      = input.bool(true, "Mark Inversion FVG", group=group_fvg)
+
+showMS        = input.bool(true, "Show Market Structure (BOS/CHoCH)", group=group_ms)
+swingLen      = input.int(5, "Swing Length", minval=2, maxval=20, group=group_ms)
+
+showLiq       = input.bool(true, "Show Liquidity Levels", group=group_liq)
+liqTol        = input.float(0.15, "Equal High/Low Tolerance (%)", minval=0.01, step=0.05, group=group_liq)
+
+showOB        = input.bool(true, "Show Order Blocks", group=group_ob)
+obLength      = input.int(10, "OB Lookback", minval=3, group=group_ob)
+
+bullColor     = input.color(color.new(#22c55e, 75), "Bullish Color", group=group_style)
+bearColor     = input.color(color.new(#ef4444, 75), "Bearish Color", group=group_style)
+msBullColor   = input.color(#22c55e, "BOS/CHoCH Bull", group=group_style)
+msBearColor   = input.color(#ef4444, "BOS/CHoCH Bear", group=group_style)
+
+// ═══════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════
+isBullFVG() =>
+    low[0] > high[2] and close[1] > open[1]   // simplified 3-candle imbalance
+
+isBearFVG() =>
+    high[0] < low[2] and close[1] < open[1]
+
+// Swing High / Low
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var float lastSL = na
+var int   lastSHBar = na
+var int   lastSLBar = na
+
+if not na(swingHigh)
+    lastSH := swingHigh
+    lastSHBar := bar_index - swingLen
+if not na(swingLow)
+    lastSL := swingLow
+    lastSLBar := bar_index - swingLen
+
+// ═══════════════════════════════════════════════════════════════
+// FAIR VALUE GAP
+// ═══════════════════════════════════════════════════════════════
+var box[] bullFVGBoxes = array.new_box()
+var box[] bearFVGBoxes = array.new_box()
+
+if showFVG and barstate.isconfirmed
+    // Bullish FVG: gap between candle 2 high and candle 0 low
+    if low > high[2]
+        top = low
+        bottom = high[2]
+        b = box.new(bar_index - 2, top, bar_index + extendFVG, bottom, 
+             border_color=color.new(#22c55e, 30), bgcolor=bullColor, 
+             text="FVG", text_color=color.new(#22c55e, 0), text_size=size.tiny)
+        array.push(bullFVGBoxes, b)
+        // keep only last few
+        if array.size(bullFVGBoxes) > 15
+            box.delete(array.shift(bullFVGBoxes))
+
+    // Bearish FVG
+    if high < low[2]
+        top = low[2]
+        bottom = high
+        b = box.new(bar_index - 2, top, bar_index + extendFVG, bottom,
+             border_color=color.new(#ef4444, 30), bgcolor=bearColor,
+             text="FVG", text_color=color.new(#ef4444, 0), text_size=size.tiny)
+        array.push(bearFVGBoxes, b)
+        if array.size(bearFVGBoxes) > 15
+            box.delete(array.shift(bearFVGBoxes))
+
+// Mitigate / remove FVG when price fills it
+if showFVG
+    for i = array.size(bullFVGBoxes) - 1 to 0
+        b = array.get(bullFVGBoxes, i)
+        if low <= box.get_bottom(b)
+            box.delete(b)
+            array.remove(bullFVGBoxes, i)
+    for i = array.size(bearFVGBoxes) - 1 to 0
+        b = array.get(bearFVGBoxes, i)
+        if high >= box.get_top(b)
+            box.delete(b)
+            array.remove(bearFVGBoxes, i)
+
+// ═══════════════════════════════════════════════════════════════
+// MARKET STRUCTURE - BOS / CHoCH (simplified)
+// ═══════════════════════════════════════════════════════════════
+var string trend = "neutral"
+var line[] msLines = array.new_line()
+var label[] msLabels = array.new_label()
+
+if showMS and not na(lastSH) and not na(lastSL)
+    // Bullish BOS: close above last swing high
+    if close > lastSH and trend != "bull"
+        l = line.new(lastSHBar, lastSH, bar_index, lastSH, color=msBullColor, style=line.style_dashed, width=1)
+        lab = label.new(bar_index, lastSH, trend == "bear" ? "CHoCH ▲" : "BOS ▲", 
+              style=label.style_label_down, color=msBullColor, textcolor=color.white, size=size.small)
+        array.push(msLines, l)
+        array.push(msLabels, lab)
+        trend := "bull"
+        if array.size(msLines) > 8
+            line.delete(array.shift(msLines))
+            label.delete(array.shift(msLabels))
+
+    // Bearish BOS: close below last swing low
+    if close < lastSL and trend != "bear"
+        l = line.new(lastSLBar, lastSL, bar_index, lastSL, color=msBearColor, style=line.style_dashed, width=1)
+        lab = label.new(bar_index, lastSL, trend == "bull" ? "CHoCH ▼" : "BOS ▼",
+              style=label.style_label_up, color=msBearColor, textcolor=color.white, size=size.small)
+        array.push(msLines, l)
+        array.push(msLabels, lab)
+        trend := "bear"
+        if array.size(msLines) > 8
+            line.delete(array.shift(msLines))
+            label.delete(array.shift(msLabels))
+
+// ═══════════════════════════════════════════════════════════════
+// LIQUIDITY (Equal Highs / Equal Lows approximation)
+// ═══════════════════════════════════════════════════════════════
+var line[] liqLines = array.new_line()
+
+if showLiq and not na(swingHigh)
+    // Simple equal high detection vs previous swing
+    if not na(lastSH) and math.abs(swingHigh - lastSH) / lastSH * 100 < liqTol
+        l = line.new(bar_index - swingLen, swingHigh, bar_index + 15, swingHigh, 
+             color=color.new(#f59e0b, 20), style=line.style_dotted, width=1)
+        array.push(liqLines, l)
+        if array.size(liqLines) > 10
+            line.delete(array.shift(liqLines))
+
+if showLiq and not na(swingLow)
+    if not na(lastSL) and math.abs(swingLow - lastSL) / lastSL * 100 < liqTol
+        l = line.new(bar_index - swingLen, swingLow, bar_index + 15, swingLow,
+             color=color.new(#f59e0b, 20), style=line.style_dotted, width=1)
+        array.push(liqLines, l)
+        if array.size(liqLines) > 10
+            line.delete(array.shift(liqLines))
+
+// ═══════════════════════════════════════════════════════════════
+// ORDER BLOCK (Simplified - last opposing candle before impulse)
+// ═══════════════════════════════════════════════════════════════
+var box[] bullOBs = array.new_box()
+var box[] bearOBs = array.new_box()
+
+if showOB and barstate.isconfirmed
+    // Bullish OB: down candle followed by strong up move
+    if close[1] < open[1] and close > high[1] and (close - open) > (high - low) * 0.5
+        b = box.new(bar_index - 1, high[1], bar_index + obLength, low[1],
+             border_color=color.new(#22c55e, 50), bgcolor=color.new(#22c55e, 88),
+             text="OB", text_size=size.tiny, text_color=#22c55e)
+        array.push(bullOBs, b)
+        if array.size(bullOBs) > 8
+            box.delete(array.shift(bullOBs))
+
+    // Bearish OB: up candle followed by strong down move
+    if close[1] > open[1] and close < low[1] and (open - close) > (high - low) * 0.5
+        b = box.new(bar_index - 1, high[1], bar_index + obLength, low[1],
+             border_color=color.new(#ef4444, 50), bgcolor=color.new(#ef4444, 88),
+             text="OB", text_size=size.tiny, text_color=#ef4444)
+        array.push(bearOBs, b)
+        if array.size(bearOBs) > 8
+            box.delete(array.shift(bearOBs))
+
+// ═══════════════════════════════════════════════════════════════
+// VISUAL - Current Bias
+// ═══════════════════════════════════════════════════════════════
+var table info = table.new(position.top_right, 2, 2, bgcolor=color.new(#12181f, 20), border_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Bias", text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 0, trend == "bull" ? "BULLISH" : trend == "bear" ? "BEARISH" : "NEUTRAL",
+         text_color=trend == "bull" ? #22c55e : trend == "bear" ? #ef4444 : color.gray, text_size=size.small)
+    table.cell(info, 0, 1, "Last SH", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, str.tostring(lastSH, format.mintick), text_color=color.white, text_size=size.tiny)
+
+// Plot swings for reference
+plotshape(showMS and not na(swingHigh), style=shape.triangledown, location=location.abovebar, 
+     color=color.new(#ef4444, 60), size=size.tiny, title="Swing High")
+plotshape(showMS and not na(swingLow), style=shape.triangleup, location=location.belowbar,
+     color=color.new(#22c55e, 60), size=size.tiny, title="Swing Low")
