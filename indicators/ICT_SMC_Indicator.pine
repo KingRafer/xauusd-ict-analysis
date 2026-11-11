@@ -1,338 +1,257 @@
-// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// © KingRafer — Full ICT / Smart Money Concepts Indicator
-// Covers: FVG, IFVG, BOS/CHoCH, OTE, Order Block, Liquidity, Turtle Soup,
-//         Silver Bullet, CISD, CRT, Power of Three zones
-
+// © KingRafer — ICT / Smart Money Concepts (Stable)
 //@version=5
-indicator("ICT Full SMC", shorttitle="ICT Full", overlay=true, max_boxes_count=150, max_lines_count=100, max_labels_count=80)
+indicator("ICT Full SMC", shorttitle="ICT SMC", overlay=true, max_boxes_count=80, max_lines_count=60, max_labels_count=40)
 
-// ═══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════
 // INPUTS
-// ═══════════════════════════════════════════════════════════════
-g_fvg   = "1. Fair Value Gap & IFVG"
-g_ms    = "2. Market Structure (BOS/CHoCH)"
-g_ote   = "3. Optimal Trade Entry (OTE)"
-g_ob    = "4. Order Block"
-g_liq   = "5. Liquidity & Turtle Soup"
-g_sb    = "6. Silver Bullet"
-g_cisd  = "7. CISD (Change in State of Delivery)"
-g_crt   = "8. Candle Range Theory"
-g_po3   = "9. Power of Three Zones"
-g_style = "Style"
+// ══════════════════════════════════════
+showFVG     = input.bool(true,  "Show FVG")
+showIFVG    = input.bool(true,  "Show Inversion FVG")
+showMS      = input.bool(true,  "Show BOS / CHoCH")
+showOTE     = input.bool(true,  "Show OTE Zone")
+showOB      = input.bool(true,  "Show Order Blocks")
+showLiq     = input.bool(true,  "Show Liquidity")
+showTurtle  = input.bool(true,  "Show Turtle Soup")
+showSB      = input.bool(true,  "Show Silver Bullet Window")
+showCISD    = input.bool(true,  "Show CISD")
+showCRT     = input.bool(true,  "Show CRT (Prev Candle)")
+showPO3     = input.bool(true,  "Show Session Background")
 
-// FVG
-showFVG     = input.bool(true,  "Show FVG", group=g_fvg)
-extendFVG   = input.int(25, "Extend FVG (bars)", minval=5, group=g_fvg)
-showIFVG    = input.bool(true,  "Show Inversion FVG", group=g_fvg)
+swingLen    = input.int(5,  "Swing Length", minval=2, maxval=15)
+extendFVG   = input.int(20, "FVG Extend Bars", minval=5)
+oteLen      = input.int(30, "OTE Lookback", minval=10)
+sbStart     = input.int(10, "Silver Bullet Start (NY hour)", minval=0, maxval=23)
+sbEnd       = input.int(11, "Silver Bullet End (NY hour)", minval=0, maxval=23)
+cisdMult    = input.float(1.4, "CISD ATR Mult", minval=1.0, step=0.1)
 
-// Market Structure
-showMS      = input.bool(true,  "Show BOS / CHoCH", group=g_ms)
-swingLen    = input.int(5, "Swing Length", minval=2, maxval=20, group=g_ms)
+bullCol = color.new(#22c55e, 80)
+bearCol = color.new(#ef4444, 80)
+oteCol  = color.new(#3b82f6, 88)
+sbCol   = color.new(#a855f7, 92)
 
-// OTE
-showOTE     = input.bool(true,  "Show OTE Zone (0.62–0.79)", group=g_ote)
-oteSwingLen = input.int(20, "OTE Swing Lookback", minval=5, group=g_ote)
-
-// Order Block
-showOB      = input.bool(true,  "Show Order Blocks", group=g_ob)
-obExtend    = input.int(15, "OB Extend (bars)", minval=3, group=g_ob)
-
-// Liquidity & Turtle Soup
-showLiq     = input.bool(true,  "Show Liquidity Levels", group=g_liq)
-showTurtle  = input.bool(true,  "Show Turtle Soup Signals", group=g_liq)
-liqTol      = input.float(0.12, "Equal H/L Tolerance %", minval=0.01, step=0.02, group=g_liq)
-
-// Silver Bullet (NY time windows)
-showSB      = input.bool(true,  "Show Silver Bullet Window", group=g_sb)
-sbStart     = input.int(10, "SB Start Hour (NY)", minval=0, maxval=23, group=g_sb)
-sbEnd       = input.int(11, "SB End Hour (NY)", minval=0, maxval=23, group=g_sb)
-
-// CISD
-showCISD    = input.bool(true,  "Show CISD (Displacement)", group=g_cisd)
-cisdMult    = input.float(1.5, "Displacement ATR Multiplier", minval=1.0, step=0.1, group=g_cisd)
-
-// CRT
-showCRT     = input.bool(true,  "Show Previous Candle Range", group=g_crt)
-
-// Power of Three
-showPO3     = input.bool(true,  "Show PO3 Session Zones", group=g_po3)
-
-// Colors
-bullCol     = input.color(color.new(#22c55e, 78), "Bullish Fill", group=g_style)
-bearCol     = input.color(color.new(#ef4444, 78), "Bearish Fill", group=g_style)
-oteCol      = input.color(color.new(#3b82f6, 85), "OTE Fill", group=g_style)
-sbCol       = input.color(color.new(#a855f7, 90), "Silver Bullet BG", group=g_style)
-
-// ═══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════
 // COMMON
-// ═══════════════════════════════════════════════════════════════
-atr = ta.atr(14)
+// ══════════════════════════════════════
+atrVal = ta.atr(14)
 
-swingHigh = ta.pivothigh(high, swingLen, swingLen)
-swingLow  = ta.pivotlow(low, swingLen, swingLen)
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
 
 var float lastSH = na
 var float lastSL = na
-var int   lastSHBar = na
-var int   lastSLBar = na
-var string trend = "neutral"
+var int   shBar  = na
+var int   slBar  = na
+var string bias  = "neutral"
 
-if not na(swingHigh)
-    lastSH := swingHigh
-    lastSHBar := bar_index - swingLen
-if not na(swingLow)
-    lastSL := swingLow
-    lastSLBar := bar_index - swingLen
+if not na(ph)
+    lastSH := ph
+    shBar  := bar_index - swingLen
+if not na(pl)
+    lastSL := pl
+    slBar  := bar_index - swingLen
 
-// ═══════════════════════════════════════════════════════════════
-// 1. FAIR VALUE GAP + INVERSION FVG
-// ═══════════════════════════════════════════════════════════════
-var box[] bullFVGs = array.new_box()
-var box[] bearFVGs = array.new_box()
-var box[] invFVGs  = array.new_box()
+// ══════════════════════════════════════
+// 1. FAIR VALUE GAP
+// ══════════════════════════════════════
+var box[] bFVG = array.new_box()
+var box[] sFVG = array.new_box()
+var box[] iFVG = array.new_box()
 
 if showFVG and barstate.isconfirmed
-    // Bullish FVG: low of current > high of 2 bars ago
+    // Bullish FVG
     if low > high[2]
-        b = box.new(bar_index-2, low, bar_index + extendFVG, high[2],
-             border_color=color.new(#22c55e, 40), bgcolor=bullCol,
-             text="FVG", text_color=#22c55e, text_size=size.tiny)
-        array.push(bullFVGs, b)
-        if array.size(bullFVGs) > 12
-            box.delete(array.shift(bullFVGs))
+        bx = box.new(bar_index - 2, low, bar_index + extendFVG, high[2], border_color=#22c55e, bgcolor=bullCol, text="FVG", text_size=size.tiny, text_color=#22c55e)
+        array.push(bFVG, bx)
+        if array.size(bFVG) > 10
+            box.delete(array.shift(bFVG))
 
     // Bearish FVG
     if high < low[2]
-        b = box.new(bar_index-2, low[2], bar_index + extendFVG, high,
-             border_color=color.new(#ef4444, 40), bgcolor=bearCol,
-             text="FVG", text_color=#ef4444, text_size=size.tiny)
-        array.push(bearFVGs, b)
-        if array.size(bearFVGs) > 12
-            box.delete(array.shift(bearFVGs))
+        bx = box.new(bar_index - 2, low[2], bar_index + extendFVG, high, border_color=#ef4444, bgcolor=bearCol, text="FVG", text_size=size.tiny, text_color=#ef4444)
+        array.push(sFVG, bx)
+        if array.size(sFVG) > 10
+            box.delete(array.shift(sFVG))
 
-// Mitigate normal FVG + detect Inversion
+// Mitigate + Inversion
 if barstate.isconfirmed
-    if showFVG
-        for i = array.size(bullFVGs) - 1 to 0
-            b = array.get(bullFVGs, i)
-            bot = box.get_bottom(b)
-            top = box.get_top(b)
-            if low <= bot
-                // filled → potential inversion if showIFVG
+    if array.size(bFVG) > 0
+        for i = array.size(bFVG) - 1 to 0
+            bx = array.get(bFVG, i)
+            if low <= box.get_bottom(bx)
                 if showIFVG
-                    inv = box.new(box.get_left(b), top, bar_index + 10, bot,
-                         border_color=color.new(#eab308, 30), bgcolor=color.new(#eab308, 88),
-                         text="iFVG", text_color=#eab308, text_size=size.tiny)
-                    array.push(invFVGs, inv)
-                    if array.size(invFVGs) > 8
-                        box.delete(array.shift(invFVGs))
-                box.delete(b)
-                array.remove(bullFVGs, i)
+                    inv = box.new(box.get_left(bx), box.get_top(bx), bar_index + 8, box.get_bottom(bx), border_color=#eab308, bgcolor=color.new(#eab308, 90), text="iFVG", text_size=size.tiny, text_color=#eab308)
+                    array.push(iFVG, inv)
+                    if array.size(iFVG) > 6
+                        box.delete(array.shift(iFVG))
+                box.delete(bx)
+                array.remove(bFVG, i)
 
-        for i = array.size(bearFVGs) - 1 to 0
-            b = array.get(bearFVGs, i)
-            bot = box.get_bottom(b)
-            top = box.get_top(b)
-            if high >= top
+    if array.size(sFVG) > 0
+        for i = array.size(sFVG) - 1 to 0
+            bx = array.get(sFVG, i)
+            if high >= box.get_top(bx)
                 if showIFVG
-                    inv = box.new(box.get_left(b), top, bar_index + 10, bot,
-                         border_color=color.new(#eab308, 30), bgcolor=color.new(#eab308, 88),
-                         text="iFVG", text_color=#eab308, text_size=size.tiny)
-                    array.push(invFVGs, inv)
-                    if array.size(invFVGs) > 8
-                        box.delete(array.shift(invFVGs))
-                box.delete(b)
-                array.remove(bearFVGs, i)
+                    inv = box.new(box.get_left(bx), box.get_top(bx), bar_index + 8, box.get_bottom(bx), border_color=#eab308, bgcolor=color.new(#eab308, 90), text="iFVG", text_size=size.tiny, text_color=#eab308)
+                    array.push(iFVG, inv)
+                    if array.size(iFVG) > 6
+                        box.delete(array.shift(iFVG))
+                box.delete(bx)
+                array.remove(sFVG, i)
 
-// ═══════════════════════════════════════════════════════════════
-// 2. MARKET STRUCTURE — BOS / CHoCH
-// ═══════════════════════════════════════════════════════════════
-var line[]  msLines  = array.new_line()
-var label[] msLabels = array.new_label()
+// ══════════════════════════════════════
+// 2. MARKET STRUCTURE BOS / CHoCH
+// ══════════════════════════════════════
+var line  msLine = na
+var label msLab  = na
 
-if showMS and not na(lastSH) and not na(lastSL) and barstate.isconfirmed
-    if close > lastSH and trend != "bull"
-        isCHoCH = trend == "bear"
-        l = line.new(lastSHBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed, width=1)
-        lab = label.new(bar_index, lastSH, isCHoCH ? "CHoCH ▲" : "BOS ▲",
-              style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.small)
-        array.push(msLines, l)
-        array.push(msLabels, lab)
-        trend := "bull"
-        if array.size(msLines) > 10
-            line.delete(array.shift(msLines))
-            label.delete(array.shift(msLabels))
+if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
+    if close > lastSH and bias != "bull"
+        txt = bias == "bear" ? "CHoCH ▲" : "BOS ▲"
+        if not na(msLine)
+            line.delete(msLine)
+        if not na(msLab)
+            label.delete(msLab)
+        msLine := line.new(shBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed)
+        msLab  := label.new(bar_index, lastSH, txt, style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.small)
+        bias   := "bull"
 
-    if close < lastSL and trend != "bear"
-        isCHoCH = trend == "bull"
-        l = line.new(lastSLBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed, width=1)
-        lab = label.new(bar_index, lastSL, isCHoCH ? "CHoCH ▼" : "BOS ▼",
-              style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.small)
-        array.push(msLines, l)
-        array.push(msLabels, lab)
-        trend := "bear"
-        if array.size(msLines) > 10
-            line.delete(array.shift(msLines))
-            label.delete(array.shift(msLabels))
+    if close < lastSL and bias != "bear"
+        txt = bias == "bull" ? "CHoCH ▼" : "BOS ▼"
+        if not na(msLine)
+            line.delete(msLine)
+        if not na(msLab)
+            label.delete(msLab)
+        msLine := line.new(slBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed)
+        msLab  := label.new(bar_index, lastSL, txt, style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.small)
+        bias   := "bear"
 
-// ═══════════════════════════════════════════════════════════════
-// 3. OPTIMAL TRADE ENTRY (OTE 0.618 – 0.786)
-// ═══════════════════════════════════════════════════════════════
-var box oteBox = na
-var line ote618 = na
-var line ote786 = na
+// ══════════════════════════════════════
+// 3. OTE ZONE (0.618 - 0.786)
+// ══════════════════════════════════════
+var box  oteB = na
+var line ote1 = na
+var line ote2 = na
 
-if showOTE
-    // Find recent major swing high & low
-    ph = ta.highest(high, oteSwingLen)
-    pl = ta.lowest(low, oteSwingLen)
-    range_ = ph - pl
+if showOTE and barstate.islast
+    hi = ta.highest(high, oteLen)
+    lo = ta.lowest(low, oteLen)
+    rng = hi - lo
+    top = lo + rng * 0.786
+    bot = lo + rng * 0.618
 
-    oteTop = pl + range_ * 0.786
-    oteBot = pl + range_ * 0.618
+    if not na(oteB)
+        box.delete(oteB)
+    if not na(ote1)
+        line.delete(ote1)
+    if not na(ote2)
+        line.delete(ote2)
 
-    // Only show when price is near the zone or structure is clear
-    if barstate.islast
-        if not na(oteBox)
-            box.delete(oteBox)
-        if not na(ote618)
-            line.delete(ote618)
-        if not na(ote786)
-            line.delete(ote786)
+    oteB := box.new(bar_index - oteLen, top, bar_index + 3, bot, border_color=#3b82f6, bgcolor=oteCol, text="OTE", text_size=size.tiny, text_color=#3b82f6)
+    ote1 := line.new(bar_index - oteLen, bot, bar_index + 3, bot, color=#3b82f6, style=line.style_dotted)
+    ote2 := line.new(bar_index - oteLen, top, bar_index + 3, top, color=#3b82f6, style=line.style_dotted)
 
-        oteBox := box.new(bar_index - oteSwingLen, oteTop, bar_index + 5, oteBot,
-             border_color=color.new(#3b82f6, 50), bgcolor=oteCol,
-             text="OTE 0.62-0.79", text_color=#3b82f6, text_size=size.tiny)
-        ote618 := line.new(bar_index - oteSwingLen, oteBot, bar_index + 5, oteBot, color=#3b82f6, style=line.style_dotted)
-        ote786 := line.new(bar_index - oteSwingLen, oteTop, bar_index + 5, oteTop, color=#3b82f6, style=line.style_dotted)
-
-// ═══════════════════════════════════════════════════════════════
-// 4. ORDER BLOCK (simplified)
-// ═══════════════════════════════════════════════════════════════
-var box[] bullOBs = array.new_box()
-var box[] bearOBs = array.new_box()
+// ══════════════════════════════════════
+// 4. ORDER BLOCK
+// ══════════════════════════════════════
+var box[] bOB = array.new_box()
+var box[] sOB = array.new_box()
 
 if showOB and barstate.isconfirmed
-    // Bullish OB: bearish candle then strong bullish displacement
-    if close[1] < open[1] and close > high[1] and (close - open) > atr * 0.6
-        b = box.new(bar_index-1, high[1], bar_index + obExtend, low[1],
-             border_color=color.new(#22c55e, 40), bgcolor=color.new(#22c55e, 88),
-             text="OB", text_color=#22c55e, text_size=size.tiny)
-        array.push(bullOBs, b)
-        if array.size(bullOBs) > 8
-            box.delete(array.shift(bullOBs))
+    if close[1] < open[1] and close > high[1] and (close - open) > atrVal * 0.5
+        bx = box.new(bar_index - 1, high[1], bar_index + 12, low[1], border_color=#22c55e, bgcolor=color.new(#22c55e, 90), text="OB", text_size=size.tiny, text_color=#22c55e)
+        array.push(bOB, bx)
+        if array.size(bOB) > 6
+            box.delete(array.shift(bOB))
 
-    // Bearish OB
-    if close[1] > open[1] and close < low[1] and (open - close) > atr * 0.6
-        b = box.new(bar_index-1, high[1], bar_index + obExtend, low[1],
-             border_color=color.new(#ef4444, 40), bgcolor=color.new(#ef4444, 88),
-             text="OB", text_color=#ef4444, text_size=size.tiny)
-        array.push(bearOBs, b)
-        if array.size(bearOBs) > 8
-            box.delete(array.shift(bearOBs))
+    if close[1] > open[1] and close < low[1] and (open - close) > atrVal * 0.5
+        bx = box.new(bar_index - 1, high[1], bar_index + 12, low[1], border_color=#ef4444, bgcolor=color.new(#ef4444, 90), text="OB", text_size=size.tiny, text_color=#ef4444)
+        array.push(sOB, bx)
+        if array.size(sOB) > 6
+            box.delete(array.shift(sOB))
 
-// ═══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════
 // 5. LIQUIDITY + TURTLE SOUP
-// ═══════════════════════════════════════════════════════════════
-var line[] liqLines = array.new_line()
+// ══════════════════════════════════════
+var line liqH = na
+var line liqL = na
 
-if showLiq and not na(swingHigh) and not na(lastSH)
-    if math.abs(swingHigh - lastSH) / lastSH * 100 < liqTol
-        l = line.new(bar_index - swingLen, swingHigh, bar_index + 20, swingHigh,
-             color=color.new(#f59e0b, 30), style=line.style_dotted, width=1)
-        array.push(liqLines, l)
-        if array.size(liqLines) > 12
-            line.delete(array.shift(liqLines))
+if showLiq and barstate.islast and not na(lastSH)
+    if not na(liqH)
+        line.delete(liqH)
+    liqH := line.new(shBar, lastSH, bar_index + 10, lastSH, color=color.new(#f59e0b, 40), style=line.style_dotted)
 
-if showLiq and not na(swingLow) and not na(lastSL)
-    if math.abs(swingLow - lastSL) / lastSL * 100 < liqTol
-        l = line.new(bar_index - swingLen, swingLow, bar_index + 20, swingLow,
-             color=color.new(#f59e0b, 30), style=line.style_dotted, width=1)
-        array.push(liqLines, l)
-        if array.size(liqLines) > 12
-            line.delete(array.shift(liqLines))
+if showLiq and barstate.islast and not na(lastSL)
+    if not na(liqL)
+        line.delete(liqL)
+    liqL := line.new(slBar, lastSL, bar_index + 10, lastSL, color=color.new(#f59e0b, 40), style=line.style_dotted)
 
-// Turtle Soup: sweep of swing then close back inside
-turtleBuy  = showTurtle and not na(lastSL) and low < lastSL and close > lastSL
-turtleSell = showTurtle and not na(lastSH) and high > lastSH and close < lastSH
+turtleLong  = showTurtle and not na(lastSL) and low < lastSL and close > lastSL
+turtleShort = showTurtle and not na(lastSH) and high > lastSH and close < lastSH
 
-plotshape(turtleBuy,  title="Turtle Soup Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, text="TS")
-plotshape(turtleSell, title="Turtle Soup Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, text="TS")
+plotshape(turtleLong,  title="TS Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, text="TS")
+plotshape(turtleShort, title="TS Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, text="TS")
 
-// ═══════════════════════════════════════════════════════════════
-// 6. SILVER BULLET WINDOW (NY Killzone style)
-// ═══════════════════════════════════════════════════════════════
-// Convert to New York time
+// ══════════════════════════════════════
+// 6. SILVER BULLET (NY time)
+// ══════════════════════════════════════
 nyHour = hour(time, "America/New_York")
 inSB   = nyHour >= sbStart and nyHour < sbEnd
 
-bgcolor(showSB and inSB ? sbCol : na, title="Silver Bullet Window")
+bgcolor(showSB and inSB ? sbCol : na, title="Silver Bullet")
 
-if showSB and inSB and barstate.isconfirmed and (turtleBuy or turtleSell or (showFVG and (low > high[2] or high < low[2])))
-    label.new(bar_index, high, "SB", style=label.style_label_center, color=#a855f7, textcolor=color.white, size=size.tiny)
+// ══════════════════════════════════════
+// 7. CISD
+// ══════════════════════════════════════
+cisdUp   = showCISD and close > open and (close - open) > atrVal * cisdMult and close > high[1]
+cisdDown = showCISD and close < open and (open - close) > atrVal * cisdMult and close < low[1]
 
-// ═══════════════════════════════════════════════════════════════
-// 7. CISD — Change in State of Delivery (strong displacement)
-// ═══════════════════════════════════════════════════════════════
-cisdBull = showCISD and close > open and (close - open) > atr * cisdMult and close > high[1]
-cisdBear = showCISD and close < open and (open - close) > atr * cisdMult and close < low[1]
+plotshape(cisdUp,   title="CISD Up",   style=shape.diamond, location=location.belowbar, color=#22c55e, size=size.tiny, text="CISD")
+plotshape(cisdDown, title="CISD Down", style=shape.diamond, location=location.abovebar, color=#ef4444, size=size.tiny, text="CISD")
 
-plotshape(cisdBull, title="CISD Bull", style=shape.diamond, location=location.belowbar, color=#22c55e, size=size.tiny, text="CISD")
-plotshape(cisdBear, title="CISD Bear", style=shape.diamond, location=location.abovebar, color=#ef4444, size=size.tiny, text="CISD")
-
-// ═══════════════════════════════════════════════════════════════
-// 8. CANDLE RANGE THEORY (previous candle high/low)
-// ═══════════════════════════════════════════════════════════════
-var line crtHigh = na
-var line crtLow  = na
+// ══════════════════════════════════════
+// 8. CRT - Previous Candle Range
+// ══════════════════════════════════════
+var line crtH = na
+var line crtL = na
 
 if showCRT and barstate.islast
-    if not na(crtHigh)
-        line.delete(crtHigh)
-    if not na(crtLow)
-        line.delete(crtLow)
-    crtHigh := line.new(bar_index - 1, high[1], bar_index + 8, high[1], color=color.new(#94a3b8, 40), style=line.style_dotted)
-    crtLow  := line.new(bar_index - 1, low[1],  bar_index + 8, low[1],  color=color.new(#94a3b8, 40), style=line.style_dotted)
+    if not na(crtH)
+        line.delete(crtH)
+    if not na(crtL)
+        line.delete(crtL)
+    crtH := line.new(bar_index - 1, high[1], bar_index + 6, high[1], color=color.new(#94a3b8, 50), style=line.style_dotted)
+    crtL := line.new(bar_index - 1, low[1],  bar_index + 6, low[1],  color=color.new(#94a3b8, 50), style=line.style_dotted)
 
-// ═══════════════════════════════════════════════════════════════
-// 9. POWER OF THREE — simple session zones (Asia / London / NY)
-// ═══════════════════════════════════════════════════════════════
-// Approximate session backgrounds for accumulation / manipulation / distribution awareness
-nyH = hour(time, "America/New_York")
+// ══════════════════════════════════════
+// 9. POWER OF THREE - Session BG
+// ══════════════════════════════════════
+isAsia   = showPO3 and (nyHour >= 19 or nyHour < 3)
+isLondon = showPO3 and nyHour >= 3 and nyHour < 8
+isNY     = showPO3 and nyHour >= 8 and nyHour < 17
 
-// Asia roughly 19:00–03:00 NY, London 03:00–08:00, NY 08:00–17:00
-isAsia   = showPO3 and (nyH >= 19 or nyH < 3)
-isLondon = showPO3 and nyH >= 3 and nyH < 8
-isNY     = showPO3 and nyH >= 8 and nyH < 17
+bgcolor(isAsia ? color.new(#64748b, 95) : na, title="Asia")
+bgcolor(isLondon ? color.new(#f59e0b, 95) : na, title="London")
+bgcolor(isNY and not inSB ? color.new(#3b82f6, 96) : na, title="New York")
 
-bgcolor(isAsia   ? color.new(#64748b, 94) : na, title="Asia (PO3 Acc)")
-bgcolor(isLondon ? color.new(#f59e0b, 94) : na, title="London (PO3 Manip)")
-bgcolor(isNY and not inSB ? color.new(#3b82f6, 95) : na, title="NY (PO3 Dist)")
-
-// ═══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════
 // INFO TABLE
-// ═══════════════════════════════════════════════════════════════
-var table info = table.new(position.top_right, 2, 5, bgcolor=color.new(#0b0f14, 10), border_width=1, border_color=#1e2a36)
+// ══════════════════════════════════════
+var table tb = table.new(position.top_right, 2, 4, bgcolor=color.new(#0b0f14, 20), border_width=1)
 
 if barstate.islast
-    table.cell(info, 0, 0, "Bias", text_color=#8b9cb3, text_size=size.small)
-    table.cell(info, 1, 0, trend == "bull" ? "BULLISH" : trend == "bear" ? "BEARISH" : "NEUTRAL",
-         text_color=trend == "bull" ? #22c55e : trend == "bear" ? #ef4444 : #8b9cb3, text_size=size.small)
+    table.cell(tb, 0, 0, "Bias", text_color=#8b9cb3, text_size=size.small)
+    table.cell(tb, 1, 0, bias == "bull" ? "BULLISH" : bias == "bear" ? "BEARISH" : "NEUTRAL", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #8b9cb3, text_size=size.small)
 
-    table.cell(info, 0, 1, "Session", text_color=#8b9cb3, text_size=size.small)
-    sess = inSB ? "SILVER BULLET" : isLondon ? "London" : isNY ? "New York" : isAsia ? "Asia" : "—"
-    table.cell(info, 1, 1, sess, text_color=#a855f7, text_size=size.small)
+    table.cell(tb, 0, 1, "Session", text_color=#8b9cb3, text_size=size.small)
+    sessName = inSB ? "SILVER BULLET" : isLondon ? "London" : isNY ? "New York" : isAsia ? "Asia" : "—"
+    table.cell(tb, 1, 1, sessName, text_color=#a855f7, text_size=size.small)
 
-    table.cell(info, 0, 2, "Last SH", text_color=#8b9cb3, text_size=size.tiny)
-    table.cell(info, 1, 2, str.tostring(lastSH, format.mintick), text_color=color.white, text_size=size.tiny)
+    table.cell(tb, 0, 2, "Swing H", text_color=#8b9cb3, text_size=size.tiny)
+    table.cell(tb, 1, 2, na(lastSH) ? "—" : str.tostring(lastSH, "#.##"), text_color=color.white, text_size=size.tiny)
 
-    table.cell(info, 0, 3, "Last SL", text_color=#8b9cb3, text_size=size.tiny)
-    table.cell(info, 1, 3, str.tostring(lastSL, format.mintick), text_color=color.white, text_size=size.tiny)
-
-    table.cell(info, 0, 4, "Turtle", text_color=#8b9cb3, text_size=size.tiny)
-    table.cell(info, 1, 4, turtleBuy ? "LONG" : turtleSell ? "SHORT" : "—",
-         text_color=turtleBuy ? #22c55e : turtleSell ? #ef4444 : #8b9cb3, text_size=size.tiny)
+    table.cell(tb, 0, 3, "Swing L", text_color=#8b9cb3, text_size=size.tiny)
+    table.cell(tb, 1, 3, na(lastSL) ? "—" : str.tostring(lastSL, "#.##"), text_color=color.white, text_size=size.tiny)
 
 // Swing markers
-plotshape(showMS and not na(swingHigh), style=shape.triangledown, location=location.abovebar, color=color.new(#ef4444, 70), size=size.tiny)
-plotshape(showMS and not na(swingLow),  style=shape.triangleup,   location=location.belowbar, color=color.new(#22c55e, 70), size=size.tiny)
+plotshape(showMS and not na(ph), style=shape.triangledown, location=location.abovebar, color=color.new(#ef4444, 70), size=size.tiny)
+plotshape(showMS and not na(pl), style=shape.triangleup,   location=location.belowbar, color=color.new(#22c55e, 70), size=size.tiny)
