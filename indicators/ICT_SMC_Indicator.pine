@@ -1,309 +1,115 @@
-// © KingRafer — ICT Strategies (Accurate)
-// Based on: Silver Bullet, Cameron, IFVG, Turtle Soup, CRT, OTE, CISD, PO3
+// © KingRafer — ICT Simple & Accurate
+// FVG + BOS/CHoCH + Turtle Soup + Silver Bullet
 //@version=5
-indicator("ICT Strategies Accurate", shorttitle="ICT Acc", overlay=true, max_boxes_count=60, max_lines_count=50, max_labels_count=40)
+indicator("ICT Simple", shorttitle="ICT", overlay=true, max_boxes_count=20, max_lines_count=10, max_labels_count=15)
 
-// ══════════════════════════════════════
-// INPUTS
-// ══════════════════════════════════════
-showFVG     = input.bool(true,  "Fair Value Gap")
-showIFVG    = input.bool(true,  "Inversion FVG")
-showMS      = input.bool(true,  "BOS / CHoCH")
-showOTE     = input.bool(true,  "OTE (from last impulse)")
-showTurtle  = input.bool(true,  "Turtle Soup")
-showCRT     = input.bool(true,  "Candle Range Theory")
-showCISD    = input.bool(true,  "CISD")
-showSB      = input.bool(true,  "Silver Bullet Window")
-showPO3     = input.bool(true,  "Power of Three Sessions")
+// ─── Inputs ───
+showFVG    = input.bool(true, "Fair Value Gap")
+showMS     = input.bool(true, "BOS / CHoCH")
+showTurtle = input.bool(true, "Turtle Soup")
+showSB     = input.bool(true, "Silver Bullet (10-11 NY)")
+swingLen   = input.int(5, "Swing Length", minval=3, maxval=10)
+fvgBars    = input.int(15, "FVG Max Bars", minval=5, maxval=30)
 
-swingLen    = input.int(5,  "Swing Length", minval=2, maxval=15)
-fvgExtend   = input.int(25, "FVG Extend Bars", minval=5)
-minFvgSize  = input.float(0.0, "Min FVG Size (points, 0=off)", minval=0)
-sbStart     = input.int(10, "SB Start Hour (NY)", minval=0, maxval=23)
-sbEnd       = input.int(11, "SB End Hour (NY)", minval=0, maxval=23)
-cisdAtr     = input.float(1.5, "CISD ATR Mult", minval=1.0, step=0.1)
-
-bullCol = color.new(#22c55e, 80)
-bearCol = color.new(#ef4444, 80)
-invCol  = color.new(#eab308, 85)
-oteCol  = color.new(#3b82f6, 88)
-sbCol   = color.new(#a855f7, 91)
-
-// ══════════════════════════════════════
-// SWINGS (confirmed pivots)
-// ══════════════════════════════════════
+// ─── Swings ───
 ph = ta.pivothigh(high, swingLen, swingLen)
 pl = ta.pivotlow(low, swingLen, swingLen)
 
 var float lastSH = na
 var float lastSL = na
-var float prevSH = na
-var float prevSL = na
 var int   shBar  = na
 var int   slBar  = na
 var string bias  = "neutral"
 
-// Last impulse legs for OTE (updated on BOS)
-var float impulseHigh = na
-var float impulseLow  = na
-var int   impulseStartBar = na
-
 if not na(ph)
-    prevSH := lastSH
     lastSH := ph
     shBar  := bar_index - swingLen
 if not na(pl)
-    prevSL := lastSL
     lastSL := pl
     slBar  := bar_index - swingLen
 
-atrVal = ta.atr(14)
 nyHour = hour(time, "America/New_York")
-inSB   = nyHour >= sbStart and nyHour < sbEnd
+inSB   = nyHour >= 10 and nyHour < 11
 
-// ══════════════════════════════════════
-// 1. FAIR VALUE GAP (strict 3-candle)
-// Bullish: low[0] > high[2]  (gap up)
-// Bearish: high[0] < low[2]  (gap down)
-// ══════════════════════════════════════
-var box[] bullBoxes = array.new_box()
-var box[] bearBoxes = array.new_box()
-var box[] invBoxes  = array.new_box()
-
-// Store FVG top/bottom for confluence checks
-var float lastBullFvgTop = na
-var float lastBullFvgBot = na
-var float lastBearFvgTop = na
-var float lastBearFvgBot = na
-
-bullFvgFormed = false
-bearFvgFormed = false
+// ─── 1. FVG (max 4 each side, auto remove when filled) ───
+var box[] bFVG = array.new_box()
+var box[] sFVG = array.new_box()
 
 if showFVG and barstate.isconfirmed
     // Bullish FVG
-    fvgTop = low
-    fvgBot = high[2]
-    fvgSize = fvgTop - fvgBot
-    if fvgTop > fvgBot and (minFvgSize == 0 or fvgSize >= minFvgSize)
-        bx = box.new(bar_index - 2, fvgTop, bar_index + fvgExtend, fvgBot, border_color=#22c55e, bgcolor=bullCol, text="FVG", text_size=size.tiny, text_color=#22c55e)
-        array.push(bullBoxes, bx)
-        lastBullFvgTop := fvgTop
-        lastBullFvgBot := fvgBot
-        bullFvgFormed := true
-        if array.size(bullBoxes) > 10
-            box.delete(array.shift(bullBoxes))
-
+    if low > high[2]
+        bx = box.new(bar_index-2, low, bar_index+fvgBars, high[2], border_color=#22c55e, bgcolor=color.new(#22c55e, 85), text="FVG", text_size=size.tiny, text_color=#22c55e)
+        array.push(bFVG, bx)
+        if array.size(bFVG) > 4
+            box.delete(array.shift(bFVG))
     // Bearish FVG
-    fvgTop := low[2]
-    fvgBot := high
-    fvgSize := fvgTop - fvgBot
-    if fvgTop > fvgBot and (minFvgSize == 0 or fvgSize >= minFvgSize)
-        bx = box.new(bar_index - 2, fvgTop, bar_index + fvgExtend, fvgBot, border_color=#ef4444, bgcolor=bearCol, text="FVG", text_size=size.tiny, text_color=#ef4444)
-        array.push(bearBoxes, bx)
-        lastBearFvgTop := fvgTop
-        lastBearFvgBot := fvgBot
-        bearFvgFormed := true
-        if array.size(bearBoxes) > 10
-            box.delete(array.shift(bearBoxes))
+    if high < low[2]
+        bx = box.new(bar_index-2, low[2], bar_index+fvgBars, high, border_color=#ef4444, bgcolor=color.new(#ef4444, 85), text="FVG", text_size=size.tiny, text_color=#ef4444)
+        array.push(sFVG, bx)
+        if array.size(sFVG) > 4
+            box.delete(array.shift(sFVG))
 
-// Mitigate FVG + create IFVG when fully violated
+// Remove filled FVG
 if barstate.isconfirmed
-    if array.size(bullBoxes) > 0
-        for i = array.size(bullBoxes) - 1 to 0
-            bx = array.get(bullBoxes, i)
-            bot = box.get_bottom(bx)
-            top = box.get_top(bx)
-            // Full fill / violation from above through bottom
-            if low < bot
-                if showIFVG
-                    inv = box.new(box.get_left(bx), top, bar_index + 12, bot, border_color=#eab308, bgcolor=invCol, text="iFVG", text_size=size.tiny, text_color=#eab308)
-                    array.push(invBoxes, inv)
-                    if array.size(invBoxes) > 6
-                        box.delete(array.shift(invBoxes))
+    if array.size(bFVG) > 0
+        for i = array.size(bFVG)-1 to 0
+            bx = array.get(bFVG, i)
+            if low <= box.get_bottom(bx)
                 box.delete(bx)
-                array.remove(bullBoxes, i)
-
-    if array.size(bearBoxes) > 0
-        for i = array.size(bearBoxes) - 1 to 0
-            bx = array.get(bearBoxes, i)
-            bot = box.get_bottom(bx)
-            top = box.get_top(bx)
-            if high > top
-                if showIFVG
-                    inv = box.new(box.get_left(bx), top, bar_index + 12, bot, border_color=#eab308, bgcolor=invCol, text="iFVG", text_size=size.tiny, text_color=#eab308)
-                    array.push(invBoxes, inv)
-                    if array.size(invBoxes) > 6
-                        box.delete(array.shift(invBoxes))
+                array.remove(bFVG, i)
+    if array.size(sFVG) > 0
+        for i = array.size(sFVG)-1 to 0
+            bx = array.get(sFVG, i)
+            if high >= box.get_top(bx)
                 box.delete(bx)
-                array.remove(bearBoxes, i)
+                array.remove(sFVG, i)
 
-// ══════════════════════════════════════
-// 3. MARKET STRUCTURE — BOS / CHoCH
-// Close beyond last confirmed swing
-// ══════════════════════════════════════
+// ─── 2. BOS / CHoCH (one line only) ───
 var line  msLine = na
 var label msLab  = na
 
-bosBull = false
-bosBear = false
-chochBull = false
-chochBear = false
-
 if showMS and barstate.isconfirmed and not na(lastSH) and not na(lastSL)
     if close > lastSH and bias != "bull"
-        isCHoCH = bias == "bear"
-        txt = isCHoCH ? "CHoCH ▲" : "BOS ▲"
+        txt = bias == "bear" ? "CHoCH" : "BOS"
         if not na(msLine)
             line.delete(msLine)
         if not na(msLab)
             label.delete(msLab)
-        msLine := line.new(shBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed, width=1)
-        msLab  := label.new(bar_index, lastSH, txt, style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.small)
-        // Update impulse for OTE (bullish leg: from lastSL to this break)
-        impulseLow  := lastSL
-        impulseHigh := close
-        impulseStartBar := slBar
-        bias := "bull"
-        bosBull := not isCHoCH
-        chochBull := isCHoCH
+        msLine := line.new(shBar, lastSH, bar_index, lastSH, color=#22c55e, style=line.style_dashed)
+        msLab  := label.new(bar_index, lastSH, txt + " ▲", style=label.style_label_down, color=#22c55e, textcolor=color.white, size=size.small)
+        bias   := "bull"
 
     if close < lastSL and bias != "bear"
-        isCHoCH = bias == "bull"
-        txt = isCHoCH ? "CHoCH ▼" : "BOS ▼"
+        txt = bias == "bull" ? "CHoCH" : "BOS"
         if not na(msLine)
             line.delete(msLine)
         if not na(msLab)
             label.delete(msLab)
-        msLine := line.new(slBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed, width=1)
-        msLab  := label.new(bar_index, lastSL, txt, style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.small)
-        impulseHigh := lastSH
-        impulseLow  := close
-        impulseStartBar := shBar
-        bias := "bear"
-        bosBear := not isCHoCH
-        chochBear := isCHoCH
+        msLine := line.new(slBar, lastSL, bar_index, lastSL, color=#ef4444, style=line.style_dashed)
+        msLab  := label.new(bar_index, lastSL, txt + " ▼", style=label.style_label_up, color=#ef4444, textcolor=color.white, size=size.small)
+        bias   := "bear"
 
-// ══════════════════════════════════════
-// 4. OTE — from last impulse swing (more accurate)
-// ══════════════════════════════════════
-var box oteBox = na
-var line ote618 = na
-var line ote786 = na
+// ─── 3. Turtle Soup ───
+tsLong  = showTurtle and not na(lastSL) and low < lastSL and close > lastSL and barstate.isconfirmed
+tsShort = showTurtle and not na(lastSH) and high > lastSH and close < lastSH and barstate.isconfirmed
 
-if showOTE and barstate.islast and not na(impulseHigh) and not na(impulseLow)
-    rng = math.abs(impulseHigh - impulseLow)
-    if rng > 0
-        // Bullish impulse → OTE is discount (retracement down)
-        // Bearish impulse → OTE is premium (retracement up)
-        float oteTop = na
-        float oteBot = na
-        if impulseHigh > impulseLow  // up impulse
-            oteTop := impulseHigh - rng * 0.618
-            oteBot := impulseHigh - rng * 0.786
-        else
-            oteTop := impulseLow + rng * 0.786
-            oteBot := impulseLow + rng * 0.618
+plotshape(tsLong,  title="TS Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, text="TS")
+plotshape(tsShort, title="TS Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, text="TS")
 
-        // Ensure top > bot
-        if oteTop < oteBot
-            tmp = oteTop
-            oteTop := oteBot
-            oteBot := tmp
+// ─── 4. Silver Bullet window ───
+bgcolor(showSB and inSB ? color.new(#a855f7, 92) : na, title="Silver Bullet")
 
-        if not na(oteBox)
-            box.delete(oteBox)
-        if not na(ote618)
-            line.delete(ote618)
-        if not na(ote786)
-            line.delete(ote786)
+// SB + structure/turtle confluence label
+if showSB and inSB and barstate.isconfirmed
+    if tsLong or (close > lastSH and bias == "bull")
+        label.new(bar_index, low, "SB", style=label.style_label_up, color=#a855f7, textcolor=color.white, size=size.tiny)
+    if tsShort or (close < lastSL and bias == "bear")
+        label.new(bar_index, high, "SB", style=label.style_label_down, color=#a855f7, textcolor=color.white, size=size.tiny)
 
-        leftBar = na(impulseStartBar) ? bar_index - 30 : impulseStartBar
-        oteBox := box.new(leftBar, oteTop, bar_index + 5, oteBot, border_color=#3b82f6, bgcolor=oteCol, text="OTE", text_size=size.tiny, text_color=#3b82f6)
-        ote618 := line.new(leftBar, oteTop, bar_index + 5, oteTop, color=#3b82f6, style=line.style_dotted)
-        ote786 := line.new(leftBar, oteBot, bar_index + 5, oteBot, color=#3b82f6, style=line.style_dotted)
-
-// ══════════════════════════════════════
-// 5. TURTLE SOUP — sweep + close back inside
-// Higher quality if near FVG (visual only)
-// ══════════════════════════════════════
-turtleLong  = showTurtle and not na(lastSL) and low < lastSL and close > lastSL and barstate.isconfirmed
-turtleShort = showTurtle and not na(lastSH) and high > lastSH and close < lastSH and barstate.isconfirmed
-
-plotshape(turtleLong,  title="TS Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, text="TS")
-plotshape(turtleShort, title="TS Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, text="TS")
-
-// ══════════════════════════════════════
-// 6. CRT — previous candle range + sweep mark
-// ══════════════════════════════════════
-var line crtHigh = na
-var line crtLow  = na
-
-crtSweepUp   = showCRT and high > high[1] and close < high[1]
-crtSweepDown = showCRT and low < low[1] and close > low[1]
-
-if showCRT and barstate.islast
-    if not na(crtHigh)
-        line.delete(crtHigh)
-    if not na(crtLow)
-        line.delete(crtLow)
-    crtHigh := line.new(bar_index - 1, high[1], bar_index + 10, high[1], color=color.new(#94a3b8, 35), style=line.style_dotted, width=1)
-    crtLow  := line.new(bar_index - 1, low[1],  bar_index + 10, low[1],  color=color.new(#94a3b8, 35), style=line.style_dotted, width=1)
-
-plotshape(crtSweepUp,   title="CRT Sweep High", style=shape.xcross, location=location.abovebar, color=#f59e0b, size=size.tiny)
-plotshape(crtSweepDown, title="CRT Sweep Low",  style=shape.xcross, location=location.belowbar, color=#f59e0b, size=size.tiny)
-
-// ══════════════════════════════════════
-// 7. CISD — strong displacement candle
-// ══════════════════════════════════════
-cisdUp   = showCISD and close > open and (close - open) > atrVal * cisdAtr and close > high[1] and barstate.isconfirmed
-cisdDown = showCISD and close < open and (open - close) > atrVal * cisdAtr and close < low[1] and barstate.isconfirmed
-
-plotshape(cisdUp,   title="CISD Up",   style=shape.diamond, location=location.belowbar, color=#22c55e, size=size.tiny, text="CISD")
-plotshape(cisdDown, title="CISD Down", style=shape.diamond, location=location.abovebar, color=#ef4444, size=size.tiny, text="CISD")
-
-// ══════════════════════════════════════
-// 8. SILVER BULLET — time window + optional confluence label
-// ══════════════════════════════════════
-bgcolor(showSB and inSB ? sbCol : na, title="Silver Bullet")
-
-// Label when structure shift or turtle happens inside SB window
-sbLong  = showSB and inSB and (turtleLong or bosBull or chochBull) and barstate.isconfirmed
-sbShort = showSB and inSB and (turtleShort or bosBear or chochBear) and barstate.isconfirmed
-
-if sbLong
-    label.new(bar_index, low, "SB Long", style=label.style_label_up, color=#a855f7, textcolor=color.white, size=size.small)
-if sbShort
-    label.new(bar_index, high, "SB Short", style=label.style_label_down, color=#a855f7, textcolor=color.white, size=size.small)
-
-// ══════════════════════════════════════
-// 9. POWER OF THREE — session zones
-// ══════════════════════════════════════
-isAsia   = showPO3 and (nyHour >= 19 or nyHour < 3)
-isLondon = showPO3 and nyHour >= 3 and nyHour < 8
-isNY     = showPO3 and nyHour >= 8 and nyHour < 17
-
-bgcolor(isAsia ? color.new(#64748b, 95) : na, title="Asia")
-bgcolor(isLondon ? color.new(#f59e0b, 95) : na, title="London")
-bgcolor(isNY and not inSB ? color.new(#3b82f6, 96) : na, title="New York")
-
-// ══════════════════════════════════════
-// INFO TABLE
-// ══════════════════════════════════════
-var table tb = table.new(position.top_right, 2, 4, bgcolor=color.new(#0b0f14, 12), border_width=1)
-
+// ─── Simple table ───
+var table tb = table.new(position.top_right, 2, 2, bgcolor=color.new(#0b0f14, 20), border_width=1)
 if barstate.islast
-    table.cell(tb, 0, 0, "Bias", text_color=#8b9cb3, text_size=size.small)
-    table.cell(tb, 1, 0, bias == "bull" ? "BULLISH" : bias == "bear" ? "BEARISH" : "NEUTRAL", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #8b9cb3, text_size=size.small)
-
-    table.cell(tb, 0, 1, "Session", text_color=#8b9cb3, text_size=size.small)
-    sess = inSB ? "SILVER BULLET" : isLondon ? "London" : isNY ? "New York" : isAsia ? "Asia" : "—"
-    table.cell(tb, 1, 1, sess, text_color=#a855f7, text_size=size.small)
-
-    table.cell(tb, 0, 2, "Swing H", text_color=#8b9cb3, text_size=size.tiny)
-    table.cell(tb, 1, 2, na(lastSH) ? "—" : str.tostring(lastSH, "#.##"), text_color=color.white, text_size=size.tiny)
-
-    table.cell(tb, 0, 3, "Swing L", text_color=#8b9cb3, text_size=size.tiny)
-    table.cell(tb, 1, 3, na(lastSL) ? "—" : str.tostring(lastSL, "#.##"), text_color=color.white, text_size=size.tiny)
-
-plotshape(showMS and not na(ph), style=shape.triangledown, location=location.abovebar, color=color.new(#ef4444, 65), size=size.tiny)
-plotshape(showMS and not na(pl), style=shape.triangleup,   location=location.belowbar, color=color.new(#22c55e, 65), size=size.tiny)
+    table.cell(tb, 0, 0, "Bias", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 0, bias == "bull" ? "BULL" : bias == "bear" ? "BEAR" : "—", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #94a3b8, text_size=size.small)
+    table.cell(tb, 0, 1, "Session", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 1, inSB ? "SILVER BULLET" : "—", text_color=#a855f7, text_size=size.small)
