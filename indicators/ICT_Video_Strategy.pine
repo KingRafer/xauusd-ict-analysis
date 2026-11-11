@@ -1,0 +1,150 @@
+// © KingRafer — ICT Strategy from video (Smart Risk style)
+// Silver Bullet + Turtle Soup + FVG (as explained in the video)
+//@version=5
+strategy("ICT Video Strategy", shorttitle="ICT Video",
+     overlay=true, pyramiding=0,
+     initial_capital=10000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_order, commission_value=0.5,
+     process_orders_on_close=true)
+
+// ══════════════════════════════════════
+// INPUTS
+// ══════════════════════════════════════
+group_mode = "Mode"
+useSB      = input.bool(true,  "Use Silver Bullet logic", group=group_mode)
+useTS      = input.bool(true,  "Use Turtle Soup logic", group=group_mode)
+onlyKZ     = input.bool(true,  "Only trade in Killzones (London/NY)", group=group_mode)
+
+group_time = "Killzones (NY time)"
+lonStart   = input.int(3,  "London start hour", minval=0, maxval=23, group=group_time)
+lonEnd     = input.int(5,  "London end hour", minval=0, maxval=23, group=group_time)
+sbStart    = input.int(10, "Silver Bullet start", minval=0, maxval=23, group=group_time)
+sbEnd      = input.int(11, "Silver Bullet end", minval=0, maxval=23, group=group_time)
+
+group_risk = "Risk"
+rrTP       = input.float(2.0, "Take Profit RR", minval=1.0, step=0.1, group=group_risk)
+slBuf      = input.float(0.2, "SL buffer (ATR)", minval=0.05, step=0.05, group=group_risk)
+swingLen   = input.int(5, "Swing length", minval=2, maxval=10, group=group_risk)
+
+// ══════════════════════════════════════
+// TIME & SWINGS
+// ══════════════════════════════════════
+nyHour  = hour(time, "America/New_York")
+inLondon = nyHour >= lonStart and nyHour < lonEnd
+inSB     = nyHour >= sbStart and nyHour < sbEnd
+inKZ     = inLondon or inSB
+
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var float lastSL = na
+var string bias  = "neutral"
+
+if not na(ph)
+    lastSH := ph
+if not na(pl)
+    lastSL := pl
+
+atrVal = ta.atr(14)
+
+// Market structure shift (video: close beyond swing)
+mssBull = barstate.isconfirmed and not na(lastSH) and close > lastSH and bias != "bull"
+mssBear = barstate.isconfirmed and not na(lastSL) and close < lastSL and bias != "bear"
+
+if mssBull
+    bias := "bull"
+if mssBear
+    bias := "bear"
+
+// FVG (3-candle gap) — video definition
+bullFVG = low > high[2]
+bearFVG = high < low[2]
+
+// Recent FVG still "active" roughly: formed in last N bars
+var int lastBullFvgBar = na
+var int lastBearFvgBar = na
+var float bullFvgTop = na
+var float bullFvgBot = na
+var float bearFvgTop = na
+var float bearFvgBot = na
+
+if bullFVG and barstate.isconfirmed
+    lastBullFvgBar := bar_index
+    bullFvgTop := low
+    bullFvgBot := high[2]
+if bearFVG and barstate.isconfirmed
+    lastBearFvgBar := bar_index
+    bearFvgTop := low[2]
+    bearFvgBot := high
+
+recentBullFVG = not na(lastBullFvgBar) and (bar_index - lastBullFvgBar) <= 10
+recentBearFVG = not na(lastBearFvgBar) and (bar_index - lastBearFvgBar) <= 10
+
+// ══════════════════════════════════════
+// SILVER BULLET (from video)
+// Sweep liquidity → MSS → entry via FVG
+// ══════════════════════════════════════
+// Sweep: take out swing then close back inside (same idea as TS during SB window)
+sweepLow  = not na(lastSL) and low < lastSL and close > lastSL
+sweepHigh = not na(lastSH) and high > lastSH and close < lastSH
+
+// Bullish SB: sweep sell-side + bullish MSS context + bullish FVG nearby
+sbLong = useSB and inSB and sweepLow and (bias == "bull" or mssBull) and (bullFVG or recentBullFVG)
+// Bearish SB: sweep buy-side + bearish MSS + bearish FVG
+sbShort = useSB and inSB and sweepHigh and (bias == "bear" or mssBear) and (bearFVG or recentBearFVG)
+
+// ══════════════════════════════════════
+// TURTLE SOUP (from video)
+// Raid liquidity while structure allows, enter with FVG idea
+// ══════════════════════════════════════
+// Video: raid below low while resting above bullish FVG (simplified: raid + reclaim + bias/FVG)
+tsLong  = useTS and sweepLow  and (bias == "bull" or bias == "neutral") and (bullFVG or recentBullFVG or mssBull)
+tsShort = useTS and sweepHigh and (bias == "bear" or bias == "neutral") and (bearFVG or recentBearFVG or mssBear)
+
+// Killzone filter
+longSignal  = (sbLong or tsLong)  and barstate.isconfirmed and (not onlyKZ or inKZ)
+shortSignal = (sbShort or tsShort) and barstate.isconfirmed and (not onlyKZ or inKZ)
+
+// ══════════════════════════════════════
+// ORDERS
+// ══════════════════════════════════════
+if longSignal and strategy.position_size == 0 and not na(lastSL)
+    sl = math.min(lastSL, low) - atrVal * slBuf
+    risk = close - sl
+    if risk > 0
+        tp = close + risk * rrTP
+        strategy.entry("Long", strategy.long)
+        strategy.exit("L-Exit", "Long", stop=sl, limit=tp)
+
+if shortSignal and strategy.position_size == 0 and not na(lastSH)
+    sl = math.max(lastSH, high) + atrVal * slBuf
+    risk = sl - close
+    if risk > 0
+        tp = close - risk * rrTP
+        strategy.entry("Short", strategy.short)
+        strategy.exit("S-Exit", "Short", stop=sl, limit=tp)
+
+// ══════════════════════════════════════
+// VISUAL
+// ══════════════════════════════════════
+plotshape(longSignal,  title="Long",  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small)
+plotshape(shortSignal, title="Short", style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small)
+
+bgcolor(inSB ? color.new(#a855f7, 92) : inLondon ? color.new(#f59e0b, 94) : na)
+
+// FVG boxes (light)
+if bullFVG and barstate.isconfirmed
+    box.new(bar_index-2, low, bar_index+8, high[2], bgcolor=color.new(#22c55e, 88), border_color=#22c55e, text="FVG", text_size=size.tiny)
+if bearFVG and barstate.isconfirmed
+    box.new(bar_index-2, low[2], bar_index+8, high, bgcolor=color.new(#ef4444, 88), border_color=#ef4444, text="FVG", text_size=size.tiny)
+
+var table tb = table.new(position.top_right, 2, 3, bgcolor=color.new(#0b0f14, 15), border_width=1)
+if barstate.islast
+    table.cell(tb, 0, 0, "Bias", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 0, bias == "bull" ? "BULL" : bias == "bear" ? "BEAR" : "—", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #94a3b8, text_size=size.small)
+    table.cell(tb, 0, 1, "Zone", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 1, inSB ? "SILVER BULLET" : inLondon ? "London" : "—", text_color=#a855f7, text_size=size.small)
+    table.cell(tb, 0, 2, "RR", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 2, str.tostring(rrTP) + "R", text_color=#3b82f6, text_size=size.small)
