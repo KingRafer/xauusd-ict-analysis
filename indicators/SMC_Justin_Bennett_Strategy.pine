@@ -1,0 +1,173 @@
+// © KingRafer — SMC Strategy (Justin Bennett style)
+// Video: SMC Trading Strategy Explained Step by Step (Full Entry Model)
+// Logic: Structure → CHoCH → OTE (0.62-0.79) → Premium/Discount → FVG → Entry
+//@version=5
+strategy("SMC Justin Bennett Model", shorttitle="SMC JB",
+     overlay=true, pyramiding=0,
+     initial_capital=10000,
+     default_qty_type=strategy.fixed, default_qty_value=1,
+     commission_type=strategy.commission.cash_per_order, commission_value=0.5,
+     process_orders_on_close=true)
+
+// ─── Inputs ───
+swingLen = input.int(5, "Swing Length", minval=2, maxval=12)
+rrTP     = input.float(2.0, "Take Profit RR", minval=1.0, step=0.1)
+slBuf    = input.float(0.15, "SL Buffer ATR", minval=0.05, step=0.05)
+useFVG   = input.bool(true, "Require FVG confluence")
+showOTE  = input.bool(true, "Show OTE zone")
+
+// ─── Swings (BOS needs CLOSE beyond swing — like video) ───
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var float lastSL = na
+var float prevSH = na
+var float prevSL = na
+var int   shBar  = na
+var int   slBar  = na
+var string bias  = "neutral"
+
+// Impulse for OTE (high→low for bearish CHoCH, low→high for bullish)
+var float impHigh = na
+var float impLow  = na
+var int   impBar  = na
+
+if not na(ph)
+    prevSH := lastSH
+    lastSH := ph
+    shBar  := bar_index - swingLen
+if not na(pl)
+    prevSL := lastSL
+    lastSL := pl
+    slBar  := bar_index - swingLen
+
+atrVal = ta.atr(14)
+
+// ─── CHoCH / BOS (close only, not wick) ───
+chochBull = false
+chochBear = false
+bosBull   = false
+bosBear   = false
+
+if barstate.isconfirmed and not na(lastSH) and not na(lastSL)
+    // Bullish: close above last swing high
+    if close > lastSH
+        if bias == "bear"
+            chochBull := true
+        else if bias != "bull"
+            bosBull := true
+        // Impulse for long OTE: from lastSL up
+        impLow  := lastSL
+        impHigh := close
+        impBar  := slBar
+        bias    := "bull"
+
+    // Bearish: close below last swing low
+    if close < lastSL
+        if bias == "bull"
+            chochBear := true
+        else if bias != "bear"
+            bosBear := true
+        impHigh := lastSH
+        impLow  := close
+        impBar  := shBar
+        bias    := "bear"
+
+// ─── OTE 0.62–0.79 + Premium/Discount 50% ───
+var float oteTop = na
+var float oteBot = na
+var float mid50  = na
+
+if not na(impHigh) and not na(impLow)
+    rng = math.abs(impHigh - impLow)
+    if rng > 0
+        if impHigh > impLow  // up impulse → discount OTE for longs
+            oteTop := impHigh - rng * 0.618
+            oteBot := impHigh - rng * 0.786
+            mid50  := impHigh - rng * 0.5
+        else  // down impulse → premium OTE for shorts
+            oteTop := impLow + rng * 0.786
+            oteBot := impLow + rng * 0.618
+            mid50  := impLow + rng * 0.5
+        if oteTop < oteBot
+            t = oteTop
+            oteTop := oteBot
+            oteBot := t
+
+// Price in OTE zone
+inOTE = not na(oteTop) and not na(oteBot) and high >= oteBot and low <= oteTop
+
+// Premium / Discount (video rule)
+// Long only in discount (below 50% of impulse)
+// Short only in premium (above 50% of impulse)
+inDiscount = not na(mid50) and close < mid50
+inPremium  = not na(mid50) and close > mid50
+
+// ─── FVG ───
+bullFVG = low > high[2]
+bearFVG = high < low[2]
+var int lastBullFvg = na
+var int lastBearFvg = na
+if bullFVG
+    lastBullFvg := bar_index
+if bearFVG
+    lastBearFvg := bar_index
+recentBullFVG = not na(lastBullFvg) and bar_index - lastBullFvg <= 12
+recentBearFVG = not na(lastBearFvg) and bar_index - lastBearFvg <= 12
+
+// ─── Entry model (video simplified to one TF) ───
+// Long: bullish bias + in discount + in OTE + (CHoCH/BOS recent or price reacting) + optional FVG
+// Practical trigger: bias bull + inOTE + inDiscount + (bullFVG or recent) on confirmed bar
+longSetup = bias == "bull" and inOTE and inDiscount and barstate.isconfirmed and (not useFVG or bullFVG or recentBullFVG)
+shortSetup = bias == "bear" and inOTE and inPremium and barstate.isconfirmed and (not useFVG or bearFVG or recentBearFVG)
+
+// Stronger: also fire on CHoCH when already in zone
+longSetup  := longSetup or (chochBull and inDiscount and inOTE)
+shortSetup := shortSetup or (chochBear and inPremium and inOTE)
+
+// ─── Orders ───
+if longSetup and strategy.position_size == 0 and not na(lastSL)
+    sl = math.min(nz(lastSL), low) - atrVal * slBuf
+    risk = close - sl
+    if risk > 0
+        tp = close + risk * rrTP
+        strategy.entry("Long", strategy.long)
+        strategy.exit("L-Exit", "Long", stop=sl, limit=tp)
+
+if shortSetup and strategy.position_size == 0 and not na(lastSH)
+    sl = math.max(nz(lastSH), high) + atrVal * slBuf
+    risk = sl - close
+    if risk > 0
+        tp = close - risk * rrTP
+        strategy.entry("Short", strategy.short)
+        strategy.exit("S-Exit", "Short", stop=sl, limit=tp)
+
+// ─── Visual ───
+plotshape(longSetup,  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small, title="Long")
+plotshape(shortSetup, style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small, title="Short")
+
+// OTE box
+var box oteBox = na
+if showOTE and barstate.islast and not na(oteTop) and not na(oteBot)
+    if not na(oteBox)
+        box.delete(oteBox)
+    left = na(impBar) ? bar_index - 30 : impBar
+    oteBox := box.new(left, oteTop, bar_index + 3, oteBot, bgcolor=color.new(#3b82f6, 88), border_color=#3b82f6, text="OTE 0.62-0.79", text_size=size.tiny, text_color=#3b82f6)
+
+// Mid 50 line
+plot(showOTE ? mid50 : na, "50%", color=color.new(#94a3b8, 40), style=plot.style_stepline)
+
+// FVG marks
+plotshape(bullFVG, style=shape.circle, location=location.belowbar, color=color.new(#22c55e, 50), size=size.tiny)
+plotshape(bearFVG, style=shape.circle, location=location.abovebar, color=color.new(#ef4444, 50), size=size.tiny)
+
+var table tb = table.new(position.top_right, 2, 3, bgcolor=color.new(#0b0f14, 15), border_width=1)
+if barstate.islast
+    table.cell(tb, 0, 0, "Bias", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 0, bias == "bull" ? "BULL" : bias == "bear" ? "BEAR" : "—", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #94a3b8, text_size=size.small)
+    table.cell(tb, 0, 1, "Zone", text_color=#94a3b8, text_size=size.small)
+    z = inPremium ? "PREMIUM" : inDiscount ? "DISCOUNT" : "—"
+    table.cell(tb, 1, 1, z, text_color=#a855f7, text_size=size.small)
+    table.cell(tb, 0, 2, "OTE", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 2, inOTE ? "YES" : "NO", text_color=inOTE ? #22c55e : #94a3b8, text_size=size.small)
