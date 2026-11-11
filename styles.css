@@ -102,6 +102,48 @@ body {
   margin-bottom: 24px;
 }
 
+/* Live Chart Section */
+.chart-section {
+  padding: 20px 20px 16px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chart-header h2 {
+  margin-bottom: 0;
+  font-size: 1.15rem;
+}
+
+.chart-badge {
+  font-size: 0.75rem;
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.tradingview-widget-container {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0b0f14;
+}
+
+.chart-note {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 12px;
+  text-align: center;
+}
+
 /* Cards */
 .card {
   background: var(--card);
@@ -325,5 +367,9 @@ footer .small {
   .price-box {
     width: 100%;
     text-align: left;
+  }
+
+  .tradingview-widget-container {
+    height: 400px !important;
   }
 }
