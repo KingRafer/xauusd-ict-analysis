@@ -1,0 +1,96 @@
+// © KingRafer — ICT Strategy Backtest (Turtle Soup / BOS+FVG)
+//@version=5
+strategy("ICT Strategy Backtest", shorttitle="ICT BT", overlay=true, 
+     pyramiding=0, initial_capital=10000, default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.02,
+     process_orders_on_close=true, calc_on_every_tick=false)
+
+// ─── Inputs ───
+swingLen  = input.int(5, "Swing Length", minval=3, maxval=10)
+rrTP1     = input.float(2.0, "TP1 RR", minval=1.0, step=0.1)
+rrTP2     = input.float(3.0, "TP2 RR", minval=1.5, step=0.1)
+slBuf     = input.float(0.2, "SL Buffer ATR", minval=0.05, step=0.05)
+onlySB    = input.bool(false, "Only Silver Bullet (10-11 NY)")
+useTP2    = input.bool(true, "Use TP2 (scale out)")
+riskPct   = input.float(1.0, "Risk % per trade", minval=0.1, step=0.1)
+
+// ─── Swings ───
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSH = na
+var float lastSL = na
+var string bias  = "neutral"
+
+if not na(ph)
+    lastSH := ph
+if not na(pl)
+    lastSL := pl
+
+atrVal = ta.atr(14)
+nyHour = hour(time, "America/New_York")
+inSB   = nyHour >= 10 and nyHour < 11
+
+// ─── FVG ───
+bullFVG = low > high[2]
+bearFVG = high < low[2]
+
+// ─── Structure ───
+bosBull = false
+bosBear = false
+if barstate.isconfirmed and not na(lastSH) and not na(lastSL)
+    if close > lastSH and bias != "bull"
+        bias := "bull"
+        bosBull := true
+    if close < lastSL and bias != "bear"
+        bias := "bear"
+        bosBear := true
+
+// ─── Turtle Soup ───
+tsLong  = not na(lastSL) and low < lastSL and close > lastSL and barstate.isconfirmed
+tsShort = not na(lastSH) and high > lastSH and close < lastSH and barstate.isconfirmed
+
+// ─── Setup filter ───
+longRaw  = (tsLong and (bias == "bull" or bias == "neutral")) or (bosBull and bullFVG)
+shortRaw = (tsShort and (bias == "bear" or bias == "neutral")) or (bosBear and bearFVG)
+
+longSetup  = longRaw and barstate.isconfirmed and (not onlySB or inSB)
+shortSetup = shortRaw and barstate.isconfirmed and (not onlySB or inSB)
+
+// ─── Entries ───
+if longSetup and not na(lastSL) and strategy.position_size == 0
+    entry = close
+    sl    = math.min(lastSL, low) - atrVal * slBuf
+    risk  = entry - sl
+    if risk > 0
+        tp1 = entry + risk * rrTP1
+        tp2 = entry + risk * rrTP2
+        strategy.entry("Long", strategy.long)
+        strategy.exit("L-TP1", "Long", stop=sl, limit=tp1, qty_percent=useTP2 ? 50 : 100)
+        if useTP2
+            strategy.exit("L-TP2", "Long", stop=sl, limit=tp2, qty_percent=50)
+
+if shortSetup and not na(lastSH) and strategy.position_size == 0
+    entry = close
+    sl    = math.max(lastSH, high) + atrVal * slBuf
+    risk  = sl - entry
+    if risk > 0
+        tp1 = entry - risk * rrTP1
+        tp2 = entry - risk * rrTP2
+        strategy.entry("Short", strategy.short)
+        strategy.exit("S-TP1", "Short", stop=sl, limit=tp1, qty_percent=useTP2 ? 50 : 100)
+        if useTP2
+            strategy.exit("S-TP2", "Short", stop=sl, limit=tp2, qty_percent=50)
+
+// ─── Visual ───
+plotshape(longSetup,  style=shape.triangleup,   location=location.belowbar, color=#22c55e, size=size.small)
+plotshape(shortSetup, style=shape.triangledown, location=location.abovebar, color=#ef4444, size=size.small)
+bgcolor(inSB ? color.new(#a855f7, 93) : na)
+
+// ─── Table ───
+var table tb = table.new(position.top_right, 2, 2, bgcolor=color.new(#0b0f14, 20), border_width=1)
+if barstate.islast
+    table.cell(tb, 0, 0, "Bias", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 0, bias == "bull" ? "BULL" : bias == "bear" ? "BEAR" : "—", text_color=bias == "bull" ? #22c55e : bias == "bear" ? #ef4444 : #94a3b8, text_size=size.small)
+    table.cell(tb, 0, 1, "Mode", text_color=#94a3b8, text_size=size.small)
+    table.cell(tb, 1, 1, onlySB ? "SB Only" : "All", text_color=#a855f7, text_size=size.small)
